@@ -1,13 +1,22 @@
 # Build WLDiag.dll with the csc.exe that ships with Windows.
-# Usage:  powershell -ExecutionPolicy Bypass -File build_wldiag.ps1
+#
+#   powershell -ExecutionPolicy Bypass -File build_wldiag.ps1 `
+#       -Game "D:\game\maimai\SDEZ1.70\Package"
+#
+# Defaults to the game path above when -Game is omitted.
 # (English-only messages: Windows PowerShell 5.1 mis-reads non-BOM UTF-8 files.)
+
+param(
+    [string]$Game = "D:\game\maimai\SDEZ1.70\Package",
+    [string]$Source = "",
+    [string]$Out = ""
+)
 
 $ErrorActionPreference = "Stop"
 
-$Game   = "D:\game\maimai\SDEZ1.70\Package"
-$Csc    = "C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe"
-$Source = "C:\Users\isakio\nyanlinkd\WLDiag.cs"
-$Out    = "$Game\Mods\WLDiag.dll"
+$Csc = "C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe"
+if ([string]::IsNullOrEmpty($Source)) { $Source = Join-Path $PSScriptRoot "WLDiag.cs" }
+if ([string]::IsNullOrEmpty($Out))    { $Out    = Join-Path $Game "Mods\WLDiag.dll" }
 
 if (-not (Test-Path $Csc))    { throw "csc.exe not found: $Csc" }
 if (-not (Test-Path $Source)) { throw "source not found: $Source" }

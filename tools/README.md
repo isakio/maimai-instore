@@ -140,11 +140,11 @@ pkill -f fake_player.py        # 用完停掉
 编译（用 Windows 自带的 csc，不需要装 SDK）：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File C:\Users\isakio\nyanlinkd\build_wldiag.ps1
+powershell -ExecutionPolicy Bypass -File .\build_wldiag.ps1 -Game "D:\game\maimai\SDEZ1.70\Package"
 ```
 
-源码必须**先同步**到 `C:\Users\isakio\nyanlinkd\WLDiag.cs`（脚本读的是那里），
-否则编译的还是旧版。文件带 UTF-8 BOM，中文日志才不会乱码。
+`-Game` 指向游戏根目录（`Sinmai.exe` 那一层）；源码默认读脚本旁边的 `WLDiag.cs`，
+产物默认写到 `<Game>\Mods\WLDiag.dll`。文件带 UTF-8 BOM，中文日志才不会乱码。
 
 编译产物会自动放到 `游戏目录\Mods\WLDiag.dll`。重启游戏后立刻生效，
 不想要了直接删掉那个 dll（还有一个 `WLDiag.dll` 同名文件不需要保留其它东西）。

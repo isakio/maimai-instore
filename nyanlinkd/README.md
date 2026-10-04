@@ -19,42 +19,40 @@
 - **网页看板（`http://<服务器>:20100/`）**：实时在线玩家、房间列表、事件流水、累计统计
 - **`/api/status`**：看板用的 JSON，排查问题时直接 curl 它
 
-## 部署（推荐：systemd 原生）
+## 部署（推荐：一键脚本，systemd）
 
-服务器上已有 Python 3.12，不需要装任何东西。
+需要 Python **3.10+**（代码里用了 `str | None` 这类语法），不需要 pip / 数据库。
 
 ```bash
-# 1. 停掉旧的 NyanLink 容器，释放 20100 / 20101
-cd /opt/nyanlink && docker compose down
+# 把 <你的域名或公网IP> 换成客户端能访问到的地址
+sudo bash install.sh <你的域名或公网IP>
 
-# 2. 建目录（在你的电脑上执行）
-ssh myserver 'sudo mkdir -p /opt/nyanlinkd && sudo chown isakio:isakio /opt/nyanlinkd'
-scp /home/isakio/myserver/maimai/nyanlinkd/nyanlinkd.py \
-    /home/isakio/myserver/maimai/nyanlinkd/nyanlinkd.service \
-    /home/isakio/myserver/maimai/nyanlinkd/test_protocol.py \
-    myserver:/opt/nyanlinkd/
-
-# 3. 装并启动（在服务器上执行）
-sudo cp /opt/nyanlinkd/nyanlinkd.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now nyanlinkd
-systemctl status nyanlinkd --no-pager
-
-# 4. 验证
-curl -s http://127.0.0.1:20100/online
-python3 /opt/nyanlinkd/test_protocol.py      # 跑一遍协议自测，应全部通过
+# 也可以指定端口：sudo bash install.sh maimai.example.com 20100 20101
 ```
 
-然后浏览器打开 `http://isakio.cn:20100/` 就是看板。
+脚本做四件事：建 `nyanlinkd` 服务账号 → 装到 `/opt/nyanlinkd` →
+用 `nyanlinkd.service.template` 生成 systemd 单元并启动 → 跑一遍协议自测。
+
+装完记得在**防火墙 / 云厂商安全组**放行 `20100/tcp`（大厅）和 `20101/tcp`（中继）。
+
+```bash
+curl -s http://127.0.0.1:20100/online      # {"totalUsers":0,"activeRecruits":0}
+```
+
+浏览器打开 `http://<你的服务器>:20100/` 就是看板。
 
 ## 部署（备选：Docker）
 
-不想动 systemd 就用这个，但要从 Docker Hub 拉 `python:3.12-alpine`（国内可能慢）。
+```bash
+cd nyanlinkd
+HOST_OVERRIDE=<你的域名或公网IP> docker compose up -d --build
+docker compose logs -f
+```
+
+不想用容器编排，前台直接跑也行：
 
 ```bash
-cd /opt/nyanlink && docker compose down
-scp /home/isakio/myserver/maimai/nyanlinkd/{nyanlinkd.py,docker-compose.yml} myserver:/opt/nyanlinkd/
-ssh myserver 'cd /opt/nyanlinkd && docker compose up -d && docker compose logs -f'
+python3 nyanlinkd.py --host-override <你的域名或公网IP>
 ```
 
 ## 常用命令
@@ -78,23 +76,27 @@ sudo systemctl restart nyanlinkd    # 重启（改完参数后）
 | `--heartbeat-timeout` | `30` | 多久没心跳就断开（秒） |
 | `--log-level` | `INFO` | `DEBUG` 会打印每一条协议消息，排查时很有用 |
 
-## 改完代码后
+## 升级
 
 ```bash
-scp nyanlinkd.py myserver:/opt/nyanlinkd/ && ssh myserver 'sudo systemctl restart nyanlinkd'
+git pull
+sudo bash nyanlinkd/install.sh <你的域名或公网IP>   # 幂等，重跑即可
 ```
 
-## 回滚到原版
+## 卸载
 
 ```bash
 sudo systemctl disable --now nyanlinkd
-cd /opt/nyanlink && docker compose up -d
+sudo rm /etc/systemd/system/nyanlinkd.service
+sudo rm -rf /opt/nyanlinkd
+sudo userdel nyanlinkd
 ```
 
 ## 说明
 
-**这个服务端解决不了「选曲界面不显示店内マッチング分类」那个问题**——那是客户端 mod
-（`WorldLink.dll` 对 Unity 游戏的 Harmony 注入）的事，服务端只负责转发。
+服务端只负责**大厅列表 + 中继转发**，它不参与游戏画面的任何事。
+「选曲界面不显示店内マッチング分类」那个问题在客户端侧，由本仓库的
+[`tools/WLDiag.cs`](../tools/WLDiag.cs)（编译产物 `client/WLDiag.dll`）解决。
 
-但它能让你**看清数据流**：打开看板，如果对方开房时「当前房间」里出现了记录、
-「在线玩家」里两个人都亮着，就说明服务端这边一切正常，问题 100% 在客户端。
+排查时它可以帮你**看清数据流**：打开看板，如果对方开房时「当前房间」里出现了记录、
+「在线玩家」里两个人都亮着，就说明服务端这边一切正常，问题在客户端。

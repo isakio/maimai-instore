@@ -1,21 +1,20 @@
-# 备选方案：用 Docker 跑 nyanlinkd。
-# 好处是不用管 Python；坏处是要从 Docker Hub 拉 python 镜像（国内可能很慢）。
-# 部署目录建议 /opt/nyanlinkd
+# 用 Docker 跑 nyanlinkd（不用管 Python 环境）
+#
+#   HOST_OVERRIDE=你的域名或公网IP docker compose up -d --build
+#
+# 不设 HOST_OVERRIDE 的话默认 example.com，客户端会连不上中继。
 services:
   nyanlinkd:
-    image: python:3.12-alpine
+    build: .
+    image: nyanlinkd:latest
     container_name: nyanlinkd
     restart: unless-stopped
     ports:
-      - "20100:20100"
-      - "20101:20101"
-    volumes:
-      - ./nyanlinkd.py:/app/nyanlinkd.py:ro
+      - "${LOBBY_PORT:-20100}:20100"
+      - "${RELAY_PORT:-20101}:20101"
     command:
-      - python
-      - /app/nyanlinkd.py
       - --host-override
-      - isakio.cn
+      - "${HOST_OVERRIDE:-example.com}"
       - --lobby-port
       - "20100"
       - --relay-port

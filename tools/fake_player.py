@@ -17,7 +17,7 @@
 
 用法：
   python3 fake_player.py                      # 连 127.0.0.1:20100/20101
-  python3 fake_player.py --server isakio.cn   # 连远程
+  python3 fake_player.py --server maimai.example.com   # 连远程
   python3 fake_player.py --name 假朋友 --music-id 12054 --auto-accept
 
 注意：假玩家自己的 keychip 要和真客户端不同，否则会把对方踢下线。

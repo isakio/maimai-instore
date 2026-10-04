@@ -565,7 +565,7 @@ def main():
     ap.add_argument("--lobby-port", type=int, default=20100)
     ap.add_argument("--relay-port", type=int, default=20101)
     ap.add_argument("--host-override", default="",
-                    help="强制 /info 返回的中继主机名（走反代时必填，例如 isakio.cn）")
+                    help="强制 /info 返回的中继主机名（走反代时必填，例如 maimai.example.com）")
     ap.add_argument("--recruit-ttl", type=int, default=30,
                     help="房间在这些秒内没有刷新就自动消失（默认 30）")
     ap.add_argument("--heartbeat-timeout", type=int, default=30,

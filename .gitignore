@@ -2,8 +2,9 @@ __pycache__/
 *.pyc
 *.pyo
 
-# 编译产物 / 打包文件
+# 编译产物 / 打包文件（client/WLDiag.dll 是本仓库自己的产物，要进库）
 *.dll
+!client/WLDiag.dll
 *.zip
 *.pdb
 
