@@ -75,6 +75,8 @@ if [ -n "${IMD_ADMIN_TOKEN:-}" ]; then
     printf 'IMD_ADMIN_TOKEN=%s\n' "$IMD_ADMIN_TOKEN" > /etc/instorematchd.env
     chmod 600 /etc/instorematchd.env
     echo "    已写入管理员 token 到 /etc/instorematchd.env（权限 600）"
+elif [ -f /etc/instorematchd.env ]; then
+    echo "    没给 IMD_ADMIN_TOKEN：沿用 /etc/instorematchd.env 里原来那个 token"
 else
     echo "    没给 IMD_ADMIN_TOKEN：公开看板照常（keychip/IP 已打码），/admin 不开放"
 fi
@@ -103,8 +105,10 @@ fi
 systemctl --no-pager --lines=0 status instorematchd || true
 
 echo "==> 5/5 自检"
-# 自检要连我们刚装的这套端口（默认 20100/20101，自定义端口时靠环境变量传进去）
-NYD_LOBBY="$LOBBY_PORT" NYD_RELAY="$RELAY_PORT" "$PY" "$DIR/test_protocol.py" \
+# 自检要连我们刚装的这套端口（默认 20100/20101，自定义端口时靠环境变量传进去）；
+# token 一起透传，给了的话自检会连管理员视图也验一遍。
+NYD_LOBBY="$LOBBY_PORT" NYD_RELAY="$RELAY_PORT" IMD_ADMIN_TOKEN="${IMD_ADMIN_TOKEN:-}" \
+    "$PY" "$DIR/test_protocol.py" \
     || echo "（协议自测有失败项，看上面输出）"
 echo
 echo "看板： http://$HOST_OVERRIDE:$LOBBY_PORT/"

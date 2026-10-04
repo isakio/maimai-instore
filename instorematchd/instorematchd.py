@@ -57,7 +57,7 @@ _IP_RE = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
 
 
 def mask_keychip(keychip):
-    """W9367886794 -> W9367***794"""
+    """W9999888877 -> W9999***877"""
     if not keychip:
         return keychip
     s = str(keychip)
@@ -67,7 +67,7 @@ def mask_keychip(keychip):
 
 
 def mask_ip(ip):
-    """223.65.96.145 -> 223.65.x.x"""
+    """203.0.113.10 -> 203.0.x.x"""
     if not ip:
         return ip
     parts = str(ip).split(".")

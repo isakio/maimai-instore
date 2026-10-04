@@ -51,7 +51,8 @@ curl -s http://127.0.0.1:20100/online      # {"totalUsers":0,"activeRecruits":0}
 
 | 谁 | 地址 | 能看到什么 |
 | --- | --- | --- |
-| 所有人 | `/`、`/api/status`、`/online`、`/info`、`/recruit/list` | keychip 显示成 `W9367***794`、IP 显示成 `223.65.x.x`；**玩家名保留**；房间/曲目/难度正常 |
+| 所有人 | `/`（看板）、`/api/status` | keychip 显示成 `W9999***877`、IP 显示成 `203.0.x.x`；**玩家名保留**；房间/曲目/难度正常 |
+| 所有人 | `/info`、`/online`、`/recruit/list` | 这三个是**客户端要用的协议接口**，按协议原样返回。`/recruit/list` 给的是房主上传的招募数据（已去掉 `Keychip`），里面有玩家名和**伪 IP**（keychip 的 md5 前 4 字节，推不回原值）；想连这些都不暴露，就自己搭一台大厅 |
 | 管理员 | `/admin?token=你的token`（页面）、`/api/status?token=…`、`/debug?token=…` | 未打码的完整信息（真 keychip、真公网 IP、原始事件） |
 
 token 不在代码里，装的时候用环境变量给（会写进 `/etc/instorematchd.env`，权限 600）：
@@ -63,12 +64,24 @@ sudo IMD_ADMIN_TOKEN='你的token' bash install.sh <你的域名或公网IP>
 不给这个变量也能正常跑：`/admin` 直接 403，公开看板照旧脱敏。
 只想临时用一下也可以手改 `/etc/instorematchd.env` 后 `sudo systemctl restart instorematchd`。
 
+想**关掉**管理员视图：`sudo rm /etc/instorematchd.env && sudo systemctl restart instorematchd`。
+
+> 注意 token 是拼在 URL 里的、而且大厅是明文 HTTP：别把带 token 的链接发出去。
+> 只想自己看的话，更稳的做法是走 SSH 隧道
+> （`ssh -L 20100:127.0.0.1:20100 <服务器>`，然后本地开 `http://127.0.0.1:20100/admin?token=…`）。
+
 ## 部署（备选：Docker）
 
 ```bash
 cd instorematchd
 HOST_OVERRIDE=<你的域名或公网IP> docker compose up -d --build
 docker compose logs -f
+```
+
+要开管理员视图就再加一个变量（不设则 `/admin` 403）：
+
+```bash
+HOST_OVERRIDE=<你的域名或公网IP> IMD_ADMIN_TOKEN=<你的token> docker compose up -d --build
 ```
 
 不想用容器编排，前台直接跑也行：
@@ -97,6 +110,7 @@ sudo systemctl restart instorematchd        # 重启（改完参数后，现在�
 | `--recruit-ttl` | `30` | 房间多久没刷新就消失（秒） |
 | `--heartbeat-timeout` | `30` | 多久没心跳就断开（秒） |
 | `--log-level` | `INFO` | `DEBUG` 会打印每一条协议消息，排查时很有用 |
+| `--admin-token` | 空 | 管理员视图（`/admin`、完整版 `/api/status`、`/debug`）的 token。也可以用环境变量 `IMD_ADMIN_TOKEN`；不设就不开放 |
 
 ## 升级
 
@@ -127,3 +141,4 @@ sudo userdel instorematchd
 
 排查时它可以帮你**看清数据流**：打开看板，如果对方开房时「当前房间」里出现了记录、
 「在线玩家」里两个人都亮着，就说明服务端这边一切正常。
+（别人看公开看板看到的是打码后的 keychip / IP；你自己带 token 看 `/admin` 才是全量。）

@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 """
 instorematchd 协议自测：模拟两个客户端，把注册 / 心跳 / 开房 / 建流 / 传数据 / 关流
-全部走一遍。改完服务端跑一次，能立刻知道有没有改坏。
+全部走一遍，顺带检查公开看板确实脱敏了、/admin 没 token 进不去。
+改完服务端跑一次，能立刻知道有没有改坏。
 
   python3 instorematchd.py --bind 127.0.0.1 --lobby-port 21100 --relay-port 21101 &
   python3 test_protocol.py
+
+环境变量：NYD_HOST / NYD_LOBBY / NYD_RELAY 换目标，IMD_ADMIN_TOKEN 顺带测管理员视图。
 """
 
 import hashlib
@@ -13,13 +16,17 @@ import os
 import socket
 import sys
 import time
+import urllib.error
 import urllib.request
+from urllib.parse import quote
 
 # 默认连生产端口；本地自测时用环境变量覆盖，例如：
 #   NYD_LOBBY=21100 NYD_RELAY=21101 python3 test_protocol.py
 HOST = os.environ.get("NYD_HOST", "127.0.0.1")
 LOBBY = int(os.environ.get("NYD_LOBBY", 20100))
 RELAY = int(os.environ.get("NYD_RELAY", 20101))
+# 设了的话顺带检查管理员视图（install.sh 会把 IMD_ADMIN_TOKEN 透传进来）
+ADMIN = os.environ.get("IMD_ADMIN_TOKEN", "")
 K1, K2 = "W1111111111", "W2222222222"
 
 
@@ -56,6 +63,15 @@ def http(method, path, body=None):
     return urllib.request.urlopen(req, timeout=3).read().decode()
 
 
+def http_code(path):
+    """只要状态码（403 之类会抛 HTTPError，这里当返回值用）"""
+    try:
+        urllib.request.urlopen(f"http://{HOST}:{LOBBY}{path}", timeout=3)
+        return 200
+    except urllib.error.HTTPError as exc:
+        return exc.code
+
+
 FAILED = []
 
 
@@ -89,6 +105,20 @@ def main():
     check(online == {"totalUsers": 2, "activeRecruits": 1}, f"/online = {online}")
     check(json.loads(http("GET", "/info"))["relayPort"] == RELAY, "/info 中继端口正确")
     check(json.loads(http("GET", "/api/status"))["online"] == 2, "/api/status 在线数正确")
+
+    print("3.5) 公开看板脱敏 / 管理员视图")
+    raw = http("GET", "/api/status")
+    check(json.loads(raw)["masked"] is True, "公开 /api/status 是脱敏视图（masked=True）")
+    check(K1 not in raw and "测试玩家" in raw, "公开视图里没有完整 keychip（玩家名保留）")
+    check(http_code("/admin") == 403, "不带 token 访问 /admin 被拒（403）")
+    check(http_code("/admin?token=wrong-token") == 403, "token 不对同样被拒（403）")
+    if ADMIN:
+        tok = quote(ADMIN, safe="")
+        check(http_code(f"/admin?token={tok}") == 200, "/admin 带对 token 正常打开")
+        check(json.loads(http("GET", f"/api/status?token={tok}"))["masked"] is False,
+              "带 token 的 /api/status 是完整视图（masked=False）")
+    else:
+        print("  · 没给 IMD_ADMIN_TOKEN，跳过管理员视图检查")
 
     print("4) 中继：建流 / 接流 / 传数据")
     sid = 424242

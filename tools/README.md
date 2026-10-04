@@ -89,12 +89,22 @@ Monitor.MusicSelectMonitor._genreTabController   (.GenreSelectController : .TabC
 在服务端模拟一个正在招募的玩家，用来单独测试客户端。
 
 ```bash
-# 在服务器上跑（先确认 instorematchd 在运行）
-cd /opt/instorematchd
-nohup python3 fake_player.py --server 127.0.0.1 --name 假朋友 --music-id 12054 --auto-accept > /tmp/fake.log 2>&1 &
-tail -f /tmp/fake.log          # 看它在干什么
-pkill -f fake_player.py        # 用完停掉
+# 启动：任何能连到大厅的机器都行（它就是另一个客户端，跑的机器不影响联机）
+python3 tools/fake_player.py --server isakio.cn --name 假朋友 --music-id 12054 --auto-accept
+
+# 想在后台挂着、同时看日志：
+nohup python3 tools/fake_player.py --server isakio.cn --name 假朋友 \
+    --music-id 12054 --auto-accept > /tmp/fake.log 2>&1 &
+tail -f /tmp/fake.log
+
+# 关闭：
+pkill -f fake_player.py
 ```
+
+`--server` 也可以是 `127.0.0.1`（和服务端同一台机器）或者你自己大厅的地址。
+注意 `install.sh` 只把服务端那几个文件装到 `/opt/instorematchd`，**不含** `fake_player.py`——
+想在服务器上跑就先 `scp tools/fake_player.py <服务器>:/tmp/` 再执行。
+启动后用 `curl -s http://<大厅>:20100/online` 能看到 `totalUsers` 多了一个。
 
 它会：注册到中继 → 每 15 秒刷新一次招募 → 自动接受对方的建流请求并把数据原样回传。
 

@@ -152,6 +152,9 @@ sudo bash instorematchd/install.sh 203.0.113.10
 ```bash
 cd maimai-instore/instorematchd
 HOST_OVERRIDE=203.0.113.10 docker compose up -d --build
+
+# 要开管理员视图（看未打码的完整信息）就再加一个变量：
+# HOST_OVERRIDE=203.0.113.10 IMD_ADMIN_TOKEN=你的token docker compose up -d --build
 ```
 
 客户端那边要把地址换成你自己的。两种做法都行：
@@ -175,7 +178,7 @@ LobbyUrl="http://203.0.113.10:20100"
 > 作为中继地址下发给客户端，填错的话客户端能进大厅但连不上中继。
 > 详细参数、升级、卸载见 [`instorematchd/README.md`](instorematchd/README.md)。
 
-看板默认**脱敏**（keychip 显示成 `W9367***794`、IP 显示成 `223.65.x.x`，玩家名保留）；
+看板默认**脱敏**（keychip 显示成 `W9999***877`、IP 显示成 `203.0.x.x`，玩家名保留）；
 想看未打码的完整信息，装的时候把 token 一起给它：
 
 ```bash

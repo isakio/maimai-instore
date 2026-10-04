@@ -12,6 +12,10 @@ services:
     ports:
       - "${LOBBY_PORT:-20100}:20100"
       - "${RELAY_PORT:-20101}:20101"
+    environment:
+      # 想用 /admin 看未打码的完整信息，就跑的时候带上 token：
+      #   IMD_ADMIN_TOKEN=你的token docker compose up -d
+      - IMD_ADMIN_TOKEN=${IMD_ADMIN_TOKEN:-}
     command:
       - --host-override
       - "${HOST_OVERRIDE:-example.com}"
