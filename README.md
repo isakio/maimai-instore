@@ -117,7 +117,10 @@ powershell -ExecutionPolicy Bypass -File .\client\install-instorematch.ps1
 
 脚本会自己找游戏目录；找不到会提示你把文件夹拖进窗口，也可以直接指定：
 `-GameDir "<游戏根目录，就是 Sinmai.exe 那一层>"`。
-不加 `-LobbyUrl` 就是默认的 `http://isakio.cn:20100`。
+
+它会顺手把大厅地址写进 `<游戏根目录>\WorldLink.toml`，默认就是我们的公共大厅
+`http://isakio.cn:20100` —— **不自己搭服务器的话，这个参数根本不用管**。
+只有你自己搭了大厅（见「方式 B」）时，才在命令最后多给一个参数改掉它。
 
 不想 clone 的话：从 [Release](https://github.com/isakio/maimai-instore/releases/latest)
 把两个 dll 下下来手动拷进 `Mods\`，再自己写那个 `WorldLink.toml` 也一样。
@@ -152,12 +155,22 @@ cd maimai-instore/instorematchd
 HOST_OVERRIDE=203.0.113.10 docker compose up -d --build
 ```
 
-客户端那边把 `-LobbyUrl` / `WorldLink.toml` 的地址换成你自己的：
+客户端那边要把地址换成你自己的。两种做法都行：
 
 ```powershell
+# 装的时候直接给参数（推荐）
 powershell -ExecutionPolicy Bypass -File .\client\install-instorematch.ps1 `
     -LobbyUrl "http://203.0.113.10:20100"
 ```
+
+或者装完之后手动改 `<游戏根目录>\WorldLink.toml`：
+
+```toml
+LobbyUrl="http://203.0.113.10:20100"
+```
+
+> `-LobbyUrl` 就是"大厅地址"这个参数本身；而 `WorldLink.toml` 才是游戏真正读的配置文件
+> （安装脚本只是帮你把它写出来而已）。
 
 > `--host-override`（脚本第一个参数）必须填**客户端能访问到的地址**：`/info` 会把它
 > 作为中继地址下发给客户端，填错的话客户端能进大厅但连不上中继。
