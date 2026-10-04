@@ -61,10 +61,10 @@ python3 instorematchd.py --host-override <你的域名或公网IP>
 ## 常用命令
 
 ```bash
-systemctl status instorematchd          # 状态
-journalctl -u instorematchd -f          # 实时日志
-journalctl -u instorematchd --since "10 min ago" | grep -E '\[(注册|断开|开房|关房)\]'
-sudo systemctl restart instorematchd    # 重启（改完参数后）
+systemctl status instorematchd              # 状态
+sudo journalctl -u instorematchd -f         # 实时日志（服务跑在系统用户下，要 sudo 才看得到）
+sudo journalctl -u instorematchd --since "10 min ago" | grep -E '\[(注册|断开|开房|关房)\]'
+sudo systemctl restart instorematchd        # 重启（改完参数后，现在会秒退秒起）
 ```
 
 ## 参数
