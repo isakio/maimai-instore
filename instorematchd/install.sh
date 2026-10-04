@@ -37,8 +37,13 @@ fi
 
 echo "==> 1/5 创建服务账号与目录 $DIR"
 
-# 更早的版本叫 nyanlinkd（单元名和服务名不同），不处理的话两个进程会抢端口
-if systemctl list-unit-files 2>/dev/null | grep -q '^nyanlinkd\.service'; then
+# 更早的版本叫 nyanlinkd（单元名和服务名不同），不处理的话两个进程会抢端口。
+#
+# 注意别写成 `systemctl list-unit-files | grep -q ...`：grep -q 匹配到就退出，
+# systemctl 收到 SIGPIPE（141），在 set -o pipefail 下整条管道会被判成失败，
+# 于是这里永远不成立。（踩过）
+if [ -f /etc/systemd/system/nyanlinkd.service ] \
+   || systemctl cat nyanlinkd.service >/dev/null 2>&1; then
     echo "    检测到旧的 nyanlinkd 服务，先停掉它（避免端口冲突）"
     systemctl disable --now nyanlinkd || true
     rm -f /etc/systemd/system/nyanlinkd.service
@@ -63,7 +68,20 @@ sed -e "s|__HOST_OVERRIDE__|$HOST_OVERRIDE|g" \
 echo "==> 4/5 启动服务"
 systemctl daemon-reload
 systemctl enable --now instorematchd
-sleep 1
+
+# 起不来就别继续跑自检了 —— 那样测的是"别人的服务"，会假装通过
+sleep 2
+if ! systemctl is-active --quiet instorematchd; then
+    echo
+    echo "!! instorematchd 没起来，最近日志：" >&2
+    journalctl -u instorematchd -n 15 --no-pager 2>/dev/null || true
+    echo >&2
+    echo "   常见原因是 20100/20101 被别的进程占着，看看是谁：" >&2
+    ss -tlnp 2>/dev/null | grep -E ':(20100|20101)\b' || echo "   （端口没被占，那就是别的错误，看上面日志）" >&2
+    echo >&2
+    echo "   如果是旧的同名服务占着：sudo systemctl disable --now <那个服务名>" >&2
+    exit 1
+fi
 systemctl --no-pager --lines=0 status instorematchd || true
 
 echo "==> 5/5 自检"
