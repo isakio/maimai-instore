@@ -16,7 +16,9 @@ maimai DX 提供了 C2C 联机。本仓库是给它的**配套工具**：一个�
 > - `instorematchd` 是**重新实现**的大厅 + 中继（Python，零依赖），目标是不改 NyanLink 客户端
 >   一行就能连 —— 消息格式、命令号、伪 IP 算法都是从它的客户端 mod **逆向**出来的；
 > - NyanLink 的客户端 mod（`WorldLink.dll`）请从
->   [官方 release](https://github.com/MuNET-OSS/NyanLink/releases) 下载，本仓库不分发。
+>   [官方 release](https://github.com/MuNET-OSS/NyanLink/releases) 下载 —— 为了方便，
+>   本仓库也原样收录了一份（`client/WorldLink.dll`，出处与许可见
+>   [`third_party/NyanLink/`](third_party/NyanLink/README.md)）。
 >
 > License 都是 MIT（沿革：`MewoLab/worldlinkd` → `Japerz12138/worldlinkd` → `MuNET-OSS/NyanLink`）。
 
@@ -47,20 +49,22 @@ maimai DX 提供了 C2C 联机。本仓库是给它的**配套工具**：一个�
 ## 仓库内容
 
 ```
-├── client/
-│   ├── InStoreMatch.dll           ← 预编译好的客户端插件（v2.5，SDEZ 1.70），下载即用
-│   └── install-instorematch.ps1   ← 一条命令：拷 DLL + 写 WorldLink.toml
+├── client/                        ← 装客户端要的东西全在这儿
+│   ├── WorldLink.dll              ← NyanLink 官方构建（原样收录，50176 字节）
+│   ├── InStoreMatch.dll           ← 本仓库的客户端插件（v2.5，SDEZ 1.70）
+│   └── install-instorematch.ps1   ← 一条命令：拷这两个 dll + 写 WorldLink.toml
 ├── tools/
-│   ├── InStoreMatch.cs            ← 客户端客户端插件（MelonLoader + Harmony，C# 5）
+│   ├── InStoreMatch.cs            ← 客户端插件源码（MelonLoader + Harmony，C# 5）
 │   ├── build_instorematch.ps1     ← 用 Windows 自带 csc.exe 编译，不需要装 SDK
 │   ├── il.py                      ← 反汇编 Assembly-CSharp.dll 的小工具
 │   ├── fake_player.py             ← 假玩家：不用真人就能测招募/进房
 │   └── README.md                  ← 插件内部逻辑、四个开关、踩过的坑
-├── instorematchd/                     ← 自研联机服务端（大厅 + 中继，Python 标准库，零依赖）
+├── instorematchd/                 ← 自研联机服务端（大厅 + 中继，Python 标准库，零依赖）
 │   ├── install.sh                 ← 一键装（systemd）
 │   ├── Dockerfile / docker-compose.yml
 │   ├── test_protocol.py           ← 协议自测
 │   └── README.md                  ← 部署步骤、参数、升级、卸载
+├── third_party/NyanLink/          ← client/WorldLink.dll 的出处与 MIT 许可
 └── docs/
     ├── 技术笔记.md              ← ★ 实现细节与调试过程（反汇编证据都在这里）
     ├── 双人联机配置清单.md       ← 给玩家看的完整配置步骤
@@ -79,8 +83,10 @@ maimai DX 提供了 C2C 联机。本仓库是给它的**配套工具**：一个�
 
 | 文件 | 从哪来 |
 | --- | --- |
-| `WorldLink.dll` | [NyanLink Releases](https://github.com/MuNET-OSS/NyanLink/releases)（本仓库不分发）。两边要用同一个文件：50176 字节 / md5 `9dfa62d5cba41deac0c2c74334ef8371` |
-| `InStoreMatch.dll` | 本仓库 [**最新 Release**](https://github.com/isakio/maimai-instore/releases/latest) 下载（v2.5，18432 字节 / md5 `1a94a9b6be9b03bfb274e41b0a8256b3`）。仓库里的 [`client/InStoreMatch.dll`](client/InStoreMatch.dll) 是同一份 |
+| `WorldLink.dll` | 本仓库 [`client/WorldLink.dll`](client/WorldLink.dll)（NyanLink 官方构建，原样收录：50176 字节 / md5 `9dfa62d5cba41deac0c2c74334ef8371`；出处与许可见 [`third_party/NyanLink/`](third_party/NyanLink/)） |
+| `InStoreMatch.dll` | 本仓库 [`client/InStoreMatch.dll`](client/InStoreMatch.dll)（v2.5，18432 字节 / md5 `1a94a9b6be9b03bfb274e41b0a8256b3`） |
+
+两个文件都在本仓库的 [`client/`](client/) 里（[最新 Release](https://github.com/isakio/maimai-instore/releases/latest) 也附了），不用再去别的地方下。
 
 **2. 在游戏根目录（`Sinmai.exe` 那一层）放 `WorldLink.toml`**
 
@@ -113,7 +119,7 @@ powershell -ExecutionPolicy Bypass -File .\client\install-instorematch.ps1 `
 （不加 `-LobbyUrl` 就是默认的 `http://isakio.cn:20100`。）
 
 不想 clone 的话：从 [Release](https://github.com/isakio/maimai-instore/releases/latest)
-把 `InStoreMatch.dll` 下下来，手动拷进 `Mods\`，再自己写那个 `WorldLink.toml` 也一样。
+把两个 dll 下下来手动拷进 `Mods\`，再自己写那个 `WorldLink.toml` 也一样。
 
 **验收**：`MelonLoader\Logs\Latest.log` 里应该有
 

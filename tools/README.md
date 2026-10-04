@@ -14,8 +14,8 @@ PYTHONPATH=/tmp/dntools python3 il.py type <rid>          # 方法属于哪个�
 PYTHONPATH=/tmp/dntools python3 il.py methods <类名关键词>  # 列类的方法
 PYTHONPATH=/tmp/dntools python3 il.py fields <类名关键词>   # 列类的字段
 
-# 分析客户端 mod（从 NyanLink release 下载的 WorldLink.dll）：
-IL_ASSEMBLY=/path/to/WorldLink.dll PYTHONPATH=/tmp/dntools python3 il.py dump rid:<rid>
+# 分析客户端 mod（仓库里的 client/WorldLink.dll，NyanLink 官方构建）：
+IL_ASSEMBLY=../client/WorldLink.dll PYTHONPATH=/tmp/dntools python3 il.py dump rid:<rid>
 ```
 
 `rid:` 形式用来精确指定同名方法（比如一堆类都有 `OnStart`）。
