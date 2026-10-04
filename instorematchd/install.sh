@@ -67,7 +67,11 @@ sed -e "s|__HOST_OVERRIDE__|$HOST_OVERRIDE|g" \
 
 echo "==> 4/5 启动服务"
 systemctl daemon-reload
-systemctl enable --now instorematchd
+# 用 restart 而不是 `enable --now`：已经跑着的话也要重启，才能用上新拷贝的代码。
+# （如果当前跑的是有"吞 SIGTERM"bug 的旧代码，这里会等满 TimeoutStopSec 才被杀掉，
+#  看起来像卡住 —— 属正常，TimeoutStopSec 就是为这种情况准备的兜底。）
+systemctl enable instorematchd
+systemctl restart instorematchd
 
 # 起不来就别继续跑自检了 —— 那样测的是"别人的服务"，会假装通过
 sleep 2
