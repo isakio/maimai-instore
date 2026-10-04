@@ -328,7 +328,8 @@ class RelayClient:
             LOG.debug("未处理的命令: %s", cmd)
 
 
-async def relay_serve(host: str, port: int, heartbeat_timeout: int):
+async def relay_serve(host: str, port: int, heartbeat_timeout: int,
+                      stop: "asyncio.Event | None" = None):
     async def on_client(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
         peer = writer.get_extra_info("peername") or ("?", 0)
         client = RelayClient(reader, writer, peer[0])
@@ -374,8 +375,16 @@ async def relay_serve(host: str, port: int, heartbeat_timeout: int):
 
     server = await asyncio.start_server(on_client, host, port)
     LOG.info("中继已启动：%s:%d", host, port)
+    if stop is None:
+        async with server:
+            await server.serve_forever()
+        return
+    # 有 stop 事件时（systemd / Ctrl+C）：等信号，然后把监听关掉正常退出。
+    # 注意别只 add_signal_handler 却不 await —— 那样 SIGTERM 会被吞掉，
+    # systemd 要等到 TimeoutStopSec 才 SIGKILL。（踩过）
     async with server:
-        await server.serve_forever()
+        await stop.wait()
+    LOG.info("收到停止信号，中继已关闭")
 
 
 # ------------------------------------------------------------------ HTTP 大厅
@@ -599,7 +608,7 @@ def main():
 
     try:
         loop.run_until_complete(relay_serve(args.bind, args.relay_port,
-                                            args.heartbeat_timeout))
+                                            args.heartbeat_timeout, stop))
     except (KeyboardInterrupt, SystemExit):
         pass
     finally:

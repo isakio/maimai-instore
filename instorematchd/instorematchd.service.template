@@ -21,6 +21,9 @@ ExecStart=/usr/bin/python3 /opt/instorematchd/instorematchd.py \
 
 Restart=on-failure
 RestartSec=5
+# 正常情况收到 SIGTERM 会立刻退出；万一以后又写出吞信号的 bug，
+# 这里最多等 10 秒就 SIGKILL，不用干等默认的 90 秒
+TimeoutStopSec=10
 NoNewPrivileges=true
 PrivateTmp=true
 
