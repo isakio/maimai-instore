@@ -33,8 +33,9 @@ sudo bash install.sh <你的域名或公网IP>
 # 也可以指定端口：sudo bash install.sh maimai.example.com 20100 20101
 ```
 
-脚本做四件事：建 `instorematchd` 服务账号 → 装到 `/opt/instorematchd` →
-用 `instorematchd.service.template` 生成 systemd 单元并启动 → 跑一遍协议自测。
+脚本会：建 `instorematchd` 服务账号 → 装到 `/opt/instorematchd` →
+用 `instorematchd.service.template` 生成 systemd 单元并重启服务 → 跑一遍协议自测。
+（重跑即升级；脚本会先看端口有没有被**别的**服务占着，是自己在占就按升级处理。）
 
 装完记得在**防火墙 / 云厂商安全组**放行 `20100/tcp`（大厅）和 `20101/tcp`（中继）。
 
@@ -85,6 +86,10 @@ sudo systemctl restart instorematchd        # 重启（改完参数后，现在�
 git pull
 sudo bash instorematchd/install.sh <你的域名或公网IP>   # 幂等，重跑即可
 ```
+
+> 服务正在跑着也没关系：脚本会 `systemctl restart`，用上新拷贝的代码。
+> 如果当前跑的是"吞 SIGTERM"那种旧代码，重启时会等 `TimeoutStopSec`（10 秒）才被杀掉，
+> 看起来像卡住 —— 属正常。
 
 ## 卸载
 

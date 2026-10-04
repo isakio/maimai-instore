@@ -108,7 +108,8 @@ Write-Host ""
 Write-Host "（如果 $mods\ 里还留着本插件改名前的旧版本，手动删掉，免得同一套补丁打两遍）" -ForegroundColor Yellow
 Write-Host ""
 Write-Host "启动游戏后看 MelonLoader\Logs\Latest.log，应出现：" -ForegroundColor Cyan
-Write-Host "  [InStoreMatch] v2.5 已加载 ...  和 7 行 [InStoreMatch] 挂钩成功"
+Write-Host "  [InStoreMatch] v... 已加载  和 7 行 [InStoreMatch] 挂钩成功"
+Write-Host "（出现“挂钩失败”的话，多半是游戏版本不是 SDEZ 1.70）" -ForegroundColor Yellow
 Write-Host ""
 Write-Host "（想自己搭大厅：仓库里 instorematchd/install.sh 一条命令就够，"
 Write-Host "  然后把 -LobbyUrl 换成你自己的地址。）" -ForegroundColor DarkGray

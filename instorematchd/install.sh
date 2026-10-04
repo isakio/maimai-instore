@@ -34,18 +34,24 @@ if ! "$PY" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)' 2>
     exit 1
 fi
 
-# 端口预检：被别的进程占着的话，新服务只会一直 auto-restart，这里直接说清楚。
-# （别写成 `... | grep -q`：grep -q 匹配到就退出，上游进程收到 SIGPIPE(141)，
+# 端口预检：被"别人"占着的话新服务只会一直 auto-restart，这里直接说清楚。
+# 注意：升级（重跑本脚本）时 20100/20101 正是 instorematchd 自己在占，必须跳过检查，
+# 否则「幂等重跑」就废了。
+# （另外别写成 `... | grep -q`：grep -q 匹配到就退出，上游进程收到 SIGPIPE(141)，
 #   在 set -o pipefail 下整条管道会被判成失败，条件永远不成立 —— 踩过。）
-for p in "$LOBBY_PORT" "$RELAY_PORT"; do
-    holder="$(ss -tlnpH 2>/dev/null | awk -v pat=":$p\$" '$4 ~ pat' | tr '\n' ' ')"
-    if [ -n "$holder" ]; then
-        echo "!! TCP $p 已经被占用：" >&2
-        echo "   $holder" >&2
-        echo "   先停掉占用它的服务或进程（如果是之前用别的名字部署的同一套服务，先 disable --now 那个单元），再重跑本脚本。" >&2
-        exit 1
-    fi
-done
+if systemctl is-active --quiet instorematchd 2>/dev/null; then
+    echo "    检测到 instorematchd 正在运行，按升级处理（端口检查跳过）"
+else
+    for p in "$LOBBY_PORT" "$RELAY_PORT"; do
+        holder="$(ss -tlnpH 2>/dev/null | awk -v pat=":$p\$" '$4 ~ pat' | tr '\n' ' ')"
+        if [ -n "$holder" ]; then
+            echo "!! TCP $p 已经被占用：" >&2
+            echo "   $holder" >&2
+            echo "   先停掉占用它的服务或进程（比如之前用别的名字部署的同一套服务：systemctl disable --now <那个单元>），再重跑本脚本。" >&2
+            exit 1
+        fi
+    done
+fi
 
 echo "==> 1/5 创建服务账号与目录 $DIR"
 
@@ -78,16 +84,18 @@ if ! systemctl is-active --quiet instorematchd; then
     echo "!! instorematchd 没起来，最近日志：" >&2
     journalctl -u instorematchd -n 15 --no-pager 2>/dev/null || true
     echo >&2
-    echo "   常见原因是 20100/20101 被别的进程占着，看看是谁：" >&2
-    ss -tlnp 2>/dev/null | grep -E ':(20100|20101)\b' || echo "   （端口没被占，那就是别的错误，看上面日志）" >&2
+    echo "   常见原因是 $LOBBY_PORT/$RELAY_PORT 被别的进程占着，看看是谁：" >&2
+    ss -tlnp 2>/dev/null | grep -E ":($LOBBY_PORT|$RELAY_PORT)\b" || echo "   （端口没被占，那就是别的错误，看上面日志）" >&2
     echo >&2
-    echo "   如果是旧的同名服务占着：sudo systemctl disable --now <那个服务名>" >&2
+    echo "   如果是别的服务占着：sudo systemctl disable --now <那个服务名>" >&2
     exit 1
 fi
 systemctl --no-pager --lines=0 status instorematchd || true
 
 echo "==> 5/5 自检"
-"$PY" "$DIR/test_protocol.py" || echo "（协议自测有失败项，看上面输出）"
+# 自检要连我们刚装的这套端口（默认 20100/20101，自定义端口时靠环境变量传进去）
+NYD_LOBBY="$LOBBY_PORT" NYD_RELAY="$RELAY_PORT" "$PY" "$DIR/test_protocol.py" \
+    || echo "（协议自测有失败项，看上面输出）"
 echo
 echo "看板： http://$HOST_OVERRIDE:$LOBBY_PORT/"
 echo "在线： curl -s http://127.0.0.1:$LOBBY_PORT/online"

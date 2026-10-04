@@ -36,15 +36,16 @@ $refs = @(
     "$Game\Sinmai_Data\Managed\UnityEngine.dll"
 )
 
-$args = @("/target:library", "/out:$Out", "/nologo", "/optimize+")
+# 注意：变量别叫 $args —— 那是 PowerShell 的自动变量
+$cscArgs = @("/target:library", "/out:$Out", "/nologo", "/optimize+")
 foreach ($r in $refs) {
     if (-not (Test-Path $r)) { throw "missing reference: $r" }
-    $args += "/reference:`"$r`""
+    $cscArgs += "/reference:`"$r`""
 }
-$args += "`"$Source`""
+$cscArgs += "`"$Source`""
 
 # single line, avoids path/encoding surprises
-$cmd = "& `"$Csc`" " + ($args -join " ")
+$cmd = "& `"$Csc`" " + ($cscArgs -join " ")
 Write-Host "Command:`n$cmd`n" -ForegroundColor Cyan
 Invoke-Expression $cmd
 
