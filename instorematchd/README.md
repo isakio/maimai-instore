@@ -45,6 +45,24 @@ curl -s http://127.0.0.1:20100/online      # {"totalUsers":0,"activeRecruits":0}
 
 浏览器打开 `http://<你的服务器>:20100/` 就是看板。
 
+## 看板与管理员视图
+
+大厅端口必须对玩家开放，所以看板跟着一起公开。默认就已经**脱敏**：
+
+| 谁 | 地址 | 能看到什么 |
+| --- | --- | --- |
+| 所有人 | `/`、`/api/status`、`/online`、`/info`、`/recruit/list` | keychip 显示成 `W9367***794`、IP 显示成 `223.65.x.x`；**玩家名保留**；房间/曲目/难度正常 |
+| 管理员 | `/admin?token=你的token`（页面）、`/api/status?token=…`、`/debug?token=…` | 未打码的完整信息（真 keychip、真公网 IP、原始事件） |
+
+token 不在代码里，装的时候用环境变量给（会写进 `/etc/instorematchd.env`，权限 600）：
+
+```bash
+sudo IMD_ADMIN_TOKEN='你的token' bash install.sh <你的域名或公网IP>
+```
+
+不给这个变量也能正常跑：`/admin` 直接 403，公开看板照旧脱敏。
+只想临时用一下也可以手改 `/etc/instorematchd.env` 后 `sudo systemctl restart instorematchd`。
+
 ## 部署（备选：Docker）
 
 ```bash

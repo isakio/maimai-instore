@@ -9,6 +9,11 @@ User=instorematchd
 Group=instorematchd
 WorkingDirectory=/opt/instorematchd
 
+# 管理员视图的 token 放在这里（install.sh 会写，权限 600）：
+#   IMD_ADMIN_TOKEN=xxxxx
+# 没有这个文件也能跑：公开看板照常，只是不开放 /admin
+EnvironmentFile=-/etc/instorematchd.env
+
 # --host-override 必须填客户端能访问到的地址（域名或公网 IP）：
 # /info 会把它作为中继地址下发给客户端，不填的话走反向代理时
 # 客户端会拿到 127.0.0.1 而连不上中继。

@@ -30,17 +30,64 @@ import argparse
 import asyncio
 import base64
 import hashlib
+import hmac
 import json
 import logging
+import os
+import re
 import signal
 import sys
 import threading
 import time
 from collections import deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 LOG = logging.getLogger("instorematchd")
+
+# /admin 和完整信息用的 token（由 --admin-token 或环境变量 IMD_ADMIN_TOKEN 传入；
+# 不要写进本仓库 —— 仓库是公开的）
+ADMIN_TOKEN = ""
+
+# ------------------------------------------------------------ 公开看板脱敏
+# 公开的看板 / /api/status 里，keychip 和 IP 一律打码（名字保留）；
+# 看全部信息要带 token 访问 /admin?token=…
+_KEYCHIP_RE = re.compile(r"\b[AW][0-9A-Za-z][0-9A-Za-z-]{5,}\b")
+_IP_RE = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
+
+
+def mask_keychip(keychip):
+    """W9367886794 -> W9367***794"""
+    if not keychip:
+        return keychip
+    s = str(keychip)
+    if len(s) <= 8:
+        return s[:2] + "***"
+    return s[:5] + "*" * (len(s) - 8) + s[-3:]
+
+
+def mask_ip(ip):
+    """223.65.96.145 -> 223.65.x.x"""
+    if not ip:
+        return ip
+    parts = str(ip).split(".")
+    if len(parts) == 4:
+        return f"{parts[0]}.{parts[1]}.x.x"
+    return str(ip)[:4] + "***"
+
+
+def mask_text(text):
+    """把自由文本（事件流水）里出现的 keychip / IP 打码"""
+    if not text:
+        return text
+
+    def _kc(m):
+        v = m.group(0)
+        if sum(ch.isdigit() for ch in v) < 4:
+            return v                      # 数字太少，当普通单词，不动
+        return mask_keychip(v)
+
+    return _IP_RE.sub(lambda m: mask_ip(m.group(0)), _KEYCHIP_RE.sub(_kc, text))
 
 # ------------------------------------------------------------------ 协议常量
 CMD_START = 1
@@ -137,7 +184,7 @@ class State:
             for k in gone:
                 self.recruits.pop(k, None)
 
-    def snapshot(self) -> dict:
+    def snapshot(self, mask: bool = False) -> dict:
         self.prune_recruits()
         with self.lock:
             clients = [
@@ -164,6 +211,18 @@ class State:
             ]
             events = list(self.events)[:40]
             stats = dict(self.stats)
+
+        # 公开视图：keychip / IP 打码（名字保留）；/admin?token=… 看原始值
+        if mask:
+            for c in clients:
+                c["keychip"] = mask_keychip(c["keychip"])
+                c["stub"] = mask_ip(c["stub"])
+                c["peer"] = mask_ip(c["peer"])
+            for r in recruits:
+                r["stub"] = mask_ip(r["stub"])
+            events = [{"ts": e["ts"], "kind": e["kind"], "text": mask_text(e["text"])}
+                      for e in events]
+
         return {
             "uptime": round(time.time() - self.started_at),
             "online": len(clients),
@@ -174,6 +233,7 @@ class State:
             "stats": stats,
             "version": PROTO_VERSION,
             "recruit_ttl": self.recruit_ttl,
+            "masked": mask,
         }
 
 
@@ -410,9 +470,10 @@ h2{font-size:15px;margin:18px 0 6px;color:#c8c8d8}
 <script>
 function ts(t){return new Date(t*1000).toLocaleTimeString('zh-CN',{hour12:false})}
 async function tick(){
-  let d; try{ d=await (await fetch('/api/status')).json() }catch(e){ return }
+  let d; try{ d=await (await fetch('/api/status'+location.search)).json() }catch(e){ return }
   document.getElementById('sub').textContent =
-    `协议 v${d.version} · 已运行 ${Math.floor(d.uptime/60)} 分 ${d.uptime%60} 秒 · 房间有效期 ${d.recruit_ttl}s`;
+    `协议 v${d.version} · 已运行 ${Math.floor(d.uptime/60)} 分 ${d.uptime%60} 秒 · 房间有效期 ${d.recruit_ttl}s` +
+    (d.masked ? ' · keychip / IP 已打码（看全部：/admin?token=…）' : ' · 管理员视图：全部信息');
   document.getElementById('cards').innerHTML =
     `<div class="card"><b class="${d.online?'ok':''}">${d.online}</b>在线玩家</div>`+
     `<div class="card"><b>${d.rooms}</b>进行中房间</div>`+
@@ -496,8 +557,23 @@ class LobbyHandler(BaseHTTPRequestHandler):
             self._json(200, {"totalUsers": snap["online"],
                              "activeRecruits": snap["rooms"]})
         elif path == "/api/status":
-            self._json(200, STATE.snapshot())
+            # 不带 token → 脱敏视图；带对 token → 全量
+            self._json(200, STATE.snapshot(mask=not self._token_ok()))
+        elif path == "/admin":
+            if not self._token_ok():
+                if not ADMIN_TOKEN:
+                    self._send(403, "管理员视图没开启：启动时加 --admin-token <token>"
+                                    "（或设环境变量 IMD_ADMIN_TOKEN）".encode("utf-8"),
+                               "text/plain; charset=utf-8")
+                else:
+                    self._send(403, "token 不对。用法：/admin?token=你的token".encode("utf-8"),
+                               "text/plain; charset=utf-8")
+                return
+            self._send(200, DASHBOARD.encode("utf-8"), "text/html; charset=utf-8")
         elif path == "/debug":
+            if not self._token_ok():
+                self._json(403, {"error": "需要 token（/debug?token=… 或 X-Admin-Token 头）"})
+                return
             snap = STATE.snapshot()
             snap["host_header"] = self.headers.get("Host")
             self._json(200, snap)
@@ -505,6 +581,15 @@ class LobbyHandler(BaseHTTPRequestHandler):
             self._send(200, DASHBOARD.encode("utf-8"), "text/html; charset=utf-8")
         else:
             self._json(404, {"error": "not found"})
+
+    def _token_ok(self) -> bool:
+        """带对 token 才算管理员：支持 ?token=xxx 或 X-Admin-Token 头"""
+        if not ADMIN_TOKEN:
+            return False
+        tok = (parse_qs(urlparse(self.path).query).get("token") or [""])[0]
+        if not tok:
+            tok = self.headers.get("X-Admin-Token", "")
+        return hmac.compare_digest(tok, ADMIN_TOKEN)
 
     def _relay_host(self) -> str:
         if HOST_OVERRIDE:
@@ -567,7 +652,7 @@ def lobby_serve(bind: str, port: int):
 
 # ------------------------------------------------------------------ 入口
 def main():
-    global STATE, HOST_OVERRIDE, RELAY_PORT
+    global STATE, HOST_OVERRIDE, RELAY_PORT, ADMIN_TOKEN
 
     ap = argparse.ArgumentParser(description="兼容 WorldLink/NyanLink 的联机服务端")
     ap.add_argument("--bind", default="0.0.0.0", help="监听地址（默认 0.0.0.0）")
@@ -581,6 +666,10 @@ def main():
                     help="多久没收到心跳就断开（默认 30 秒）")
     ap.add_argument("--log-level", default="INFO",
                     choices=["DEBUG", "INFO", "WARNING", "ERROR"])
+    ap.add_argument("--admin-token", default=os.environ.get("IMD_ADMIN_TOKEN", ""),
+                    help="看 /admin（完整信息）用的 token；也可以放进环境变量 "
+                         "IMD_ADMIN_TOKEN。不设置就不开放 /admin，"
+                         "公开看板的 keychip / IP 依旧打码")
     args = ap.parse_args()
 
     logging.basicConfig(
@@ -591,6 +680,8 @@ def main():
 
     RELAY_PORT = args.relay_port
     HOST_OVERRIDE = args.host_override
+    ADMIN_TOKEN = args.admin_token or ""
+    LOG.info("管理员视图(/admin)：%s", "已开启" if ADMIN_TOKEN else "未开启")
     STATE = State(args.recruit_ttl)
 
     threading.Thread(target=lobby_serve, args=(args.bind, args.lobby_port),

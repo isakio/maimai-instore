@@ -69,6 +69,16 @@ sed -e "s|__HOST_OVERRIDE__|$HOST_OVERRIDE|g" \
     -e "s|__RELAY_PORT__|$RELAY_PORT|g" \
     "$SRC/instorematchd.service.template" > /etc/systemd/system/instorematchd.service
 
+# 管理员视图的 token（可选）：通过环境变量传，不写进仓库/单元文件
+#   sudo IMD_ADMIN_TOKEN=你的token bash instorematchd/install.sh <域名>
+if [ -n "${IMD_ADMIN_TOKEN:-}" ]; then
+    printf 'IMD_ADMIN_TOKEN=%s\n' "$IMD_ADMIN_TOKEN" > /etc/instorematchd.env
+    chmod 600 /etc/instorematchd.env
+    echo "    已写入管理员 token 到 /etc/instorematchd.env（权限 600）"
+else
+    echo "    没给 IMD_ADMIN_TOKEN：公开看板照常（keychip/IP 已打码），/admin 不开放"
+fi
+
 echo "==> 4/5 启动服务"
 systemctl daemon-reload
 # 用 restart 而不是 `enable --now`：已经跑着的话也要重启，才能用上新拷贝的代码。
