@@ -3,6 +3,9 @@
 参照 [MuNET-OSS/NyanLink](https://github.com/MuNET-OSS/NyanLink)（Kotlin 版 worldlinkd）重写，
 **协议完全兼容，客户端 mod 不用改任何东西**，只要 `LobbyUrl` 指向本服务即可。
 
+> 已经有跑着的大厅（`http://isakio.cn:20100`），**只想玩的话不需要自己搭** ——
+> 直接看仓库 [README 的「方式 A」](../README.md)。这份文档是给想自建的人看的。
+
 | | 原版 NyanLink（Docker 镜像） | nyanlinkd |
 | --- | --- | --- |
 | 语言 / 依赖 | Kotlin + JVM | Python 3.12，**只用标准库** |
