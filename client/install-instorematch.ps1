@@ -27,7 +27,9 @@ function Test-GameDir([string]$path) {
     return [bool]($path -and (Test-Path (Join-Path $path "Sinmai.exe")))
 }
 
-# 没给 -GameDir 就自己找：当前目录往上 3 层 → 各盘符下常见的 game/maimai/SDEZ 目录（最多再下两层）
+# 没给 -GameDir 就自己找：
+#   1) 当前目录往上 3 层里有没有；
+#   2) 各盘符下名字像游戏目录的（game / maimai / SDEZ / Sinmai …）里限深 4 层找 Sinmai.exe。
 if (-not (Test-GameDir $GameDir)) {
     $candidates = New-Object System.Collections.ArrayList
     $here = (Get-Location).Path
@@ -37,21 +39,20 @@ if (-not (Test-GameDir $GameDir)) {
     }
     foreach ($root in (Get-PSDrive -PSProvider FileSystem -ErrorAction SilentlyContinue).Root) {
         foreach ($d in (Get-ChildItem -Path $root -Directory -ErrorAction SilentlyContinue |
-                        Where-Object { $_.Name -in @("game", "Game", "maimai", "SDEZ", "Sinmai", "games") })) {
+                        Where-Object { $_.Name -in @("game", "Game", "games", "maimai", "SDEZ", "Sinmai") })) {
             [void]$candidates.Add($d.FullName)
-            foreach ($d2 in (Get-ChildItem -Path $d.FullName -Directory -ErrorAction SilentlyContinue)) {
-                if (Test-GameDir $d2.FullName) { $GameDir = $d2.FullName; break }
-                foreach ($d3 in (Get-ChildItem -Path $d2.FullName -Directory -ErrorAction SilentlyContinue)) {
-                    if (Test-GameDir $d3.FullName) { $GameDir = $d3.FullName; break }
-                }
-                if ($GameDir) { break }
-            }
-            if ($GameDir) { break }
         }
-        if ($GameDir) { break }
     }
+
+    foreach ($c in $candidates) { if (Test-GameDir $c) { $GameDir = $c; break } }
+
     if (-not $GameDir) {
-        foreach ($c in $candidates) { if (Test-GameDir $c) { $GameDir = $c; break } }
+        foreach ($c in $candidates) {
+            Write-Host "  ...在 $c 里找 Sinmai.exe" -ForegroundColor DarkGray
+            $hit = Get-ChildItem -Path $c -Filter "Sinmai.exe" -Recurse -Depth 4 -File -ErrorAction SilentlyContinue |
+                   Select-Object -First 1
+            if ($hit) { $GameDir = $hit.DirectoryName; break }
+        }
     }
 }
 
