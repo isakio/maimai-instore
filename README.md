@@ -17,8 +17,7 @@ maimai DX 提供了 C2C 联机。这个仓库是它的**配套补完**：把「�
 > License 都是 MIT（沿革：`MewoLab/worldlinkd` → `Japerz12138/worldlinkd` → `MuNET-OSS/NyanLink`）。
 
 **只想玩？** 我们有一台已经跑着的大厅 `http://isakio.cn:20100`，装完客户端就能连 ——
-看下面的[「方式 A」](#方式-a连我的服务器最省事客户端装完就能玩)。
-想自己开一台，看[「方式 B」](#方式-b自己搭服务器不想连我那台或者想开给一群人)。
+看下面的「方式 A」。想自己开一台，看「方式 B」。
 
 ## 解决的问题
 
@@ -53,18 +52,18 @@ maimai DX 提供了 C2C 联机。这个仓库是它的**配套补完**：把「�
 ├── tools/
 │   ├── InStoreMatch.cs            ← 客户端修复插件（MelonLoader + Harmony，C# 5）
 │   ├── build_instorematch.ps1     ← 用 Windows 自带 csc.exe 编译，不需要装 SDK
-│   ├── il.py                ← 反汇编 Assembly-CSharp.dll 的小工具
-│   ├── fake_player.py       ← 假玩家：不用真人就能测招募/进房
-│   └── README.md
-├── nyanlinkd/               ← 自研联机服务端（大厅 + 中继，Python 标准库，零依赖）
-│   ├── install.sh           ← 一键装（systemd）
+│   ├── il.py                      ← 反汇编 Assembly-CSharp.dll 的小工具
+│   ├── fake_player.py             ← 假玩家：不用真人就能测招募/进房
+│   └── README.md                  ← 插件内部逻辑、四个开关、踩过的坑
+├── nyanlinkd/                     ← 自研联机服务端（大厅 + 中继，Python 标准库，零依赖）
+│   ├── install.sh                 ← 一键装（systemd）
 │   ├── Dockerfile / docker-compose.yml
-│   ├── test_protocol.py     ← 协议自测
-│   └── README.md            ← 部署步骤、参数、升级、卸载
+│   ├── test_protocol.py           ← 协议自测
+│   └── README.md                  ← 部署步骤、参数、升级、卸载
 └── docs/
-    ├── 联机排错记录.md       ← ★ 完整排查过程与结论（反汇编证据都在这里）
-    ├── 双人联机配置清单.md    ← 给玩家看的配置步骤
-    └── 给朋友看-安装步骤.md   ← 可以直接转发给搭子的简版说明
+    ├── 联机排错记录.md             ← ★ 完整排查过程与结论（反汇编证据都在这里）
+    ├── 双人联机配置清单.md          ← 给玩家看的完整配置步骤
+    └── 给朋友看-安装步骤.md         ← 可以直接转发给搭子的简版说明
 ```
 
 ## 怎么用
