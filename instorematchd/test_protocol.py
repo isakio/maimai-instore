@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-nyanlinkd 协议自测：模拟两个客户端，把注册 / 心跳 / 开房 / 建流 / 传数据 / 关流
+instorematchd 协议自测：模拟两个客户端，把注册 / 心跳 / 开房 / 建流 / 传数据 / 关流
 全部走一遍。改完服务端跑一次，能立刻知道有没有改坏。
 
-  python3 nyanlinkd.py --bind 127.0.0.1 --lobby-port 21100 --relay-port 21101 &
+  python3 instorematchd.py --bind 127.0.0.1 --lobby-port 21100 --relay-port 21101 &
   python3 test_protocol.py
 """
 

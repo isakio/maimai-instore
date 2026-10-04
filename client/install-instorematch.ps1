@@ -56,5 +56,5 @@ Write-Host ""
 Write-Host "启动游戏后看 MelonLoader\Logs\Latest.log，应出现：" -ForegroundColor Cyan
 Write-Host "  [InStoreMatch] v2.5 已加载 ...  和 7 行 [InStoreMatch] 挂钩成功"
 Write-Host ""
-Write-Host "（想自己搭大厅：仓库里 nyanlinkd/install.sh 一条命令就够，"
+Write-Host "（想自己搭大厅：仓库里 instorematchd/install.sh 一条命令就够，"
 Write-Host "  然后把 -LobbyUrl 换成你自己的地址。）" -ForegroundColor DarkGray

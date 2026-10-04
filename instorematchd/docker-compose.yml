@@ -1,13 +1,13 @@
-# 用 Docker 跑 nyanlinkd（不用管 Python 环境）
+# 用 Docker 跑 instorematchd（不用管 Python 环境）
 #
 #   HOST_OVERRIDE=你的域名或公网IP docker compose up -d --build
 #
 # 不设 HOST_OVERRIDE 的话默认 example.com，客户端会连不上中继。
 services:
-  nyanlinkd:
+  instorematchd:
     build: .
-    image: nyanlinkd:latest
-    container_name: nyanlinkd
+    image: instorematchd:latest
+    container_name: instorematchd
     restart: unless-stopped
     ports:
       - "${LOBBY_PORT:-20100}:20100"

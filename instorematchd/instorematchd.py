@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-nyanlinkd —— 兼容 WorldLink / NyanLink 客户端 mod 的自建联机服务端
+instorematchd —— 兼容 WorldLink / NyanLink 客户端 mod 的自建联机服务端
 
 参照 MuNET-OSS/NyanLink（worldlinkd 的 Kotlin 实现）重写，协议完全兼容：
 客户端 mod 不需要任何改动，只要 LobbyUrl 指向本服务即可。
@@ -40,7 +40,7 @@ from collections import deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
 
-LOG = logging.getLogger("nyanlinkd")
+LOG = logging.getLogger("instorematchd")
 
 # ------------------------------------------------------------------ 协议常量
 CMD_START = 1
@@ -380,7 +380,7 @@ async def relay_serve(host: str, port: int, heartbeat_timeout: int):
 
 # ------------------------------------------------------------------ HTTP 大厅
 DASHBOARD = """<!doctype html><html lang="zh"><head><meta charset="utf-8">
-<title>nyanlinkd 看板</title><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>instorematchd 看板</title><meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
 body{font:14px/1.6 system-ui,"Microsoft YaHei",sans-serif;background:#16161c;color:#e8e8ef;margin:0;padding:20px}
 h1{font-size:18px;margin:0 0 4px}.sub{color:#8b8b9b;margin-bottom:16px}
@@ -393,7 +393,7 @@ th{color:#8b8b9b;font-weight:500}
 .ok{color:#7ee787}.warn{color:#ffa657}
 h2{font-size:15px;margin:18px 0 6px;color:#c8c8d8}
 </style></head><body>
-<h1>nyanlinkd</h1><div class="sub" id="sub">加载中…</div>
+<h1>instorematchd</h1><div class="sub" id="sub">加载中…</div>
 <div class="cards" id="cards"></div>
 <h2>在线玩家</h2><table id="clients"><thead><tr><th>keychip</th><th>伪IP</th><th>来源</th><th>在线</th><th>空闲</th><th>流</th></tr></thead><tbody></tbody></table>
 <h2>当前房间</h2><table id="rooms"><thead><tr><th>房主</th><th>曲目ID</th><th>难度</th><th>存在</th><th>伪IP</th></tr></thead><tbody></tbody></table>
@@ -425,7 +425,7 @@ tick(); setInterval(tick,2000);
 
 
 class LobbyHandler(BaseHTTPRequestHandler):
-    server_version = "nyanlinkd"
+    server_version = "instorematchd"
     protocol_version = "HTTP/1.1"
 
     def log_message(self, fmt, *args):

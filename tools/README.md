@@ -89,8 +89,8 @@ Monitor.MusicSelectMonitor._genreTabController   (.GenreSelectController : .TabC
 在服务端模拟一个正在招募的玩家，用来单独测试客户端。
 
 ```bash
-# 在服务器上跑（先确认 nyanlinkd 在运行）
-cd /opt/nyanlinkd
+# 在服务器上跑（先确认 instorematchd 在运行）
+cd /opt/instorematchd
 nohup python3 fake_player.py --server 127.0.0.1 --name 假朋友 --music-id 12054 --auto-accept > /tmp/fake.log 2>&1 &
 tail -f /tmp/fake.log          # 看它在干什么
 pkill -f fake_player.py        # 用完停掉

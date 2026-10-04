@@ -1,4 +1,4 @@
-# nyanlinkd —— 自己写的 NyanLink 服务端
+# instorematchd —— 自己写的 NyanLink 服务端
 
 参照 [MuNET-OSS/NyanLink](https://github.com/MuNET-OSS/NyanLink)（Kotlin 版 worldlinkd）重写，
 **协议完全兼容，客户端 mod 不用改任何东西**，只要 `LobbyUrl` 指向本服务即可。
@@ -6,7 +6,7 @@
 > 已经有跑着的大厅（`http://isakio.cn:20100`），**只想玩的话不需要自己搭** ——
 > 直接看仓库 [README 的「方式 A」](../README.md)。这份文档是给想自建的人看的。
 
-| | 原版 NyanLink（Docker 镜像） | nyanlinkd |
+| | 原版 NyanLink（Docker 镜像） | instorematchd |
 | --- | --- | --- |
 | 语言 / 依赖 | Kotlin + JVM | Python 3.12，**只用标准库** |
 | 镜像体积 | ~200 MB | 0（原生运行） |
@@ -33,8 +33,8 @@ sudo bash install.sh <你的域名或公网IP>
 # 也可以指定端口：sudo bash install.sh maimai.example.com 20100 20101
 ```
 
-脚本做四件事：建 `nyanlinkd` 服务账号 → 装到 `/opt/nyanlinkd` →
-用 `nyanlinkd.service.template` 生成 systemd 单元并启动 → 跑一遍协议自测。
+脚本做四件事：建 `instorematchd` 服务账号 → 装到 `/opt/instorematchd` →
+用 `instorematchd.service.template` 生成 systemd 单元并启动 → 跑一遍协议自测。
 
 装完记得在**防火墙 / 云厂商安全组**放行 `20100/tcp`（大厅）和 `20101/tcp`（中继）。
 
@@ -47,7 +47,7 @@ curl -s http://127.0.0.1:20100/online      # {"totalUsers":0,"activeRecruits":0}
 ## 部署（备选：Docker）
 
 ```bash
-cd nyanlinkd
+cd instorematchd
 HOST_OVERRIDE=<你的域名或公网IP> docker compose up -d --build
 docker compose logs -f
 ```
@@ -55,16 +55,16 @@ docker compose logs -f
 不想用容器编排，前台直接跑也行：
 
 ```bash
-python3 nyanlinkd.py --host-override <你的域名或公网IP>
+python3 instorematchd.py --host-override <你的域名或公网IP>
 ```
 
 ## 常用命令
 
 ```bash
-systemctl status nyanlinkd          # 状态
-journalctl -u nyanlinkd -f          # 实时日志
-journalctl -u nyanlinkd --since "10 min ago" | grep -E '\[(注册|断开|开房|关房)\]'
-sudo systemctl restart nyanlinkd    # 重启（改完参数后）
+systemctl status instorematchd          # 状态
+journalctl -u instorematchd -f          # 实时日志
+journalctl -u instorematchd --since "10 min ago" | grep -E '\[(注册|断开|开房|关房)\]'
+sudo systemctl restart instorematchd    # 重启（改完参数后）
 ```
 
 ## 参数
@@ -83,16 +83,16 @@ sudo systemctl restart nyanlinkd    # 重启（改完参数后）
 
 ```bash
 git pull
-sudo bash nyanlinkd/install.sh <你的域名或公网IP>   # 幂等，重跑即可
+sudo bash instorematchd/install.sh <你的域名或公网IP>   # 幂等，重跑即可
 ```
 
 ## 卸载
 
 ```bash
-sudo systemctl disable --now nyanlinkd
-sudo rm /etc/systemd/system/nyanlinkd.service
-sudo rm -rf /opt/nyanlinkd
-sudo userdel nyanlinkd
+sudo systemctl disable --now instorematchd
+sudo rm /etc/systemd/system/instorematchd.service
+sudo rm -rf /opt/instorematchd
+sudo userdel instorematchd
 ```
 
 ## 说明

@@ -13,7 +13,7 @@ maimai DX 提供了 C2C 联机。这个仓库是它的**配套补完**：把「�
 >
 > - `InStoreMatch` 是独立的 MelonLoader 插件，Harmony 补丁全部打在**游戏本体**
 >   （`Assembly-CSharp`）上，完全不碰 NyanLink 的 mod；
-> - `nyanlinkd` 是**重新实现**的大厅 + 中继（Python，零依赖），目标是不改 NyanLink 客户端
+> - `instorematchd` 是**重新实现**的大厅 + 中继（Python，零依赖），目标是不改 NyanLink 客户端
 >   一行就能连 —— 消息格式、命令号、伪 IP 算法都是从它的客户端 mod **逆向**出来的；
 > - NyanLink 的客户端 mod（`WorldLink.dll`）请从
 >   [官方 release](https://github.com/MuNET-OSS/NyanLink/releases) 下载，本仓库不分发。
@@ -60,7 +60,7 @@ maimai DX 提供了 C2C 联机。这个仓库是它的**配套补完**：把「�
 │   ├── il.py                      ← 反汇编 Assembly-CSharp.dll 的小工具
 │   ├── fake_player.py             ← 假玩家：不用真人就能测招募/进房
 │   └── README.md                  ← 插件内部逻辑、四个开关、踩过的坑
-├── nyanlinkd/                     ← 自研联机服务端（大厅 + 中继，Python 标准库，零依赖）
+├── instorematchd/                     ← 自研联机服务端（大厅 + 中继，Python 标准库，零依赖）
 │   ├── install.sh                 ← 一键装（systemd）
 │   ├── Dockerfile / docker-compose.yml
 │   ├── test_protocol.py           ← 协议自测
@@ -129,23 +129,23 @@ powershell -ExecutionPolicy Bypass -File .\client\install-instorematch.ps1 `
 
 ### 方式 B：自己搭服务器（不想连我那台，或者想开给一群人）
 
-`nyanlinkd` 只用 Python 标准库，一台有公网 IP 的 Linux 5 分钟搞定。
+`instorematchd` 只用 Python 标准库，一台有公网 IP 的 Linux 5 分钟搞定。
 
 ```bash
 git clone https://github.com/isakio/maimai-instore.git && cd maimai-instore
 
 # 把 203.0.113.10 换成你的公网 IP 或域名
-sudo bash nyanlinkd/install.sh 203.0.113.10
+sudo bash instorematchd/install.sh 203.0.113.10
 ```
 
-脚本会建服务账号、装到 `/opt/nyanlinkd`、生成 systemd 单元并启动、跑一遍协议自测。
+脚本会建服务账号、装到 `/opt/instorematchd`、生成 systemd 单元并启动、跑一遍协议自测。
 装完在**防火墙和云厂商安全组**放行 `20100/tcp`（大厅）+ `20101/tcp`（中继），
 然后浏览器打开 `http://203.0.113.10:20100/` 就是看板。
 
 也可以用 Docker：
 
 ```bash
-cd maimai-instore/nyanlinkd
+cd maimai-instore/instorematchd
 HOST_OVERRIDE=203.0.113.10 docker compose up -d --build
 ```
 
@@ -158,7 +158,7 @@ powershell -ExecutionPolicy Bypass -File .\client\install-instorematch.ps1 `
 
 > `--host-override`（脚本第一个参数）必须填**客户端能访问到的地址**：`/info` 会把它
 > 作为中继地址下发给客户端，填错的话客户端能进大厅但连不上中继。
-> 详细参数、升级、卸载见 [`nyanlinkd/README.md`](nyanlinkd/README.md)。
+> 详细参数、升级、卸载见 [`instorematchd/README.md`](instorematchd/README.md)。
 
 两种方式可以混用：你自建了大厅，也可以把地址发给朋友一起连。
 

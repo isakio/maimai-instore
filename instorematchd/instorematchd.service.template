@@ -1,18 +1,18 @@
-# nyanlinkd systemd 单元（由 install.sh 生成，__HOST_OVERRIDE__ 会替换成你的域名/IP）
+# instorematchd systemd 单元（由 install.sh 生成，__HOST_OVERRIDE__ 会替换成你的域名/IP）
 [Unit]
-Description=nyanlinkd (NyanLink compatible lobby + relay)
+Description=instorematchd (NyanLink compatible lobby + relay)
 After=network.target
 
 [Service]
 Type=simple
-User=nyanlinkd
-Group=nyanlinkd
-WorkingDirectory=/opt/nyanlinkd
+User=instorematchd
+Group=instorematchd
+WorkingDirectory=/opt/instorematchd
 
 # --host-override 必须填客户端能访问到的地址（域名或公网 IP）：
 # /info 会把它作为中继地址下发给客户端，不填的话走反向代理时
 # 客户端会拿到 127.0.0.1 而连不上中继。
-ExecStart=/usr/bin/python3 /opt/nyanlinkd/nyanlinkd.py \
+ExecStart=/usr/bin/python3 /opt/instorematchd/instorematchd.py \
     --host-override __HOST_OVERRIDE__ \
     --lobby-port __LOBBY_PORT__ \
     --relay-port __RELAY_PORT__ \
@@ -26,7 +26,7 @@ PrivateTmp=true
 
 StandardOutput=journal
 StandardError=journal
-SyslogIdentifier=nyanlinkd
+SyslogIdentifier=instorematchd
 
 [Install]
 WantedBy=multi-user.target
