@@ -1,11 +1,20 @@
 # NyanLink Companion
 
-[NyanLink](https://github.com/MuNET-OSS/NyanLink)（[MewoLab/worldlinkd](https://github.com/MewoLab/worldlinkd) 的 fork）给
+[NyanLink](https://github.com/MuNET-OSS/NyanLink)（上游是 [MewoLab/worldlinkd](https://github.com/MewoLab/worldlinkd)）给
 maimai DX 提供了 C2C 联机。这个仓库是它的**配套补完**：把「店内マッチング」这个分类
 真正修好，另外附一份自研的联机服务端（协议兼容，零依赖）。
 
-> 本仓库**不分发** NyanLink 的任何二进制，也不包含它的源码 —— 客户端 mod 请自行从
-> [官方 release](https://github.com/MuNET-OSS/NyanLink/releases) 下载。这里只有我们自己写的代码。
+> **和 NyanLink 的关系**：这不是它的分支，也不包含它的源码或二进制 —— 但它**配套**它，
+> 服务端也是照着它的协议**重写**的：
+>
+> - `WLDiag` 是独立的 MelonLoader 插件，Harmony 补丁全部打在**游戏本体**
+>   （`Assembly-CSharp`）上，完全不碰 NyanLink 的 mod；
+> - `nyanlinkd` 是**重新实现**的大厅 + 中继（Python，零依赖），目标是不改 NyanLink 客户端
+>   一行就能连 —— 消息格式、命令号、伪 IP 算法都是从它的客户端 mod **逆向**出来的；
+> - NyanLink 的客户端 mod（`WorldLink.dll`）请从
+>   [官方 release](https://github.com/MuNET-OSS/NyanLink/releases) 下载，本仓库不分发。
+>
+> License 都是 MIT（沿革：`MewoLab/worldlinkd` → `Japerz12138/worldlinkd` → `MuNET-OSS/NyanLink`）。
 
 **只想玩？** 我们有一台已经跑着的大厅 `http://isakio.cn:20100`，装完客户端就能连 ——
 看下面的[「方式 A」](#方式-a连我的服务器最省事客户端装完就能玩)。
