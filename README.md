@@ -5,8 +5,8 @@
 [![公共大厅](https://img.shields.io/badge/%E5%85%AC%E5%85%B1%E5%A4%A7%E5%8E%85-isakio.cn%3A20100-blue)](http://isakio.cn:20100)
 
 [NyanLink](https://github.com/MuNET-OSS/NyanLink)（上游是 [MewoLab/worldlinkd](https://github.com/MewoLab/worldlinkd)）给
-maimai DX 提供了 C2C 联机。这个仓库是它的**配套补完**：把「店内マッチング」这个分类
-真正修好，另外附一份自研的联机服务端（协议兼容，零依赖）。
+maimai DX 提供了 C2C 联机。本仓库是给它的**配套工具**：一个客户端插件，让选曲界面
+底部的「店内マッチング」直接可用；另外附一份自研的大厅 + 中继服务端（协议兼容，零依赖）。
 
 > **和 NyanLink 的关系**：这不是它的分支，也不包含它的源码或二进制 —— 但它**配套**它，
 > 服务端也是照着它的协议**重写**的：
