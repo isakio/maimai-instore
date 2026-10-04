@@ -1,33 +1,71 @@
 # InStoreMatch 安装脚本（Windows / PowerShell）
 #
 # 作用：
-#   1. 把仓库里的 InStoreMatch.dll 复制到 <游戏目录>\Mods\
+#   1. 把 WorldLink.dll 和 InStoreMatch.dll 复制到 <游戏目录>\Mods\
 #   2. 生成 <游戏目录>\WorldLink.toml（默认指向 isakio.cn 的公共大厅）
-#   3. 打印剩下需要手动做的 3 件事
+#   3. 打印剩下需要手动做的 2 件事
 #
-# 用法（连公共大厅，最省事）：
+# 用法（最省事：什么都不用给，脚本会自己找游戏目录）：
+#   powershell -ExecutionPolicy Bypass -File .\install-instorematch.ps1
+#
+# 找不到的话可以直接把路径给它（游戏根目录 = Sinmai.exe 所在那一层，通常叫 Package）：
 #   powershell -ExecutionPolicy Bypass -File .\install-instorematch.ps1 `
 #       -GameDir "D:\game\maimai\SDEZ1.70\Package"
 #
-# 想连自己搭的大厅，就加 -LobbyUrl：
+# 连自己搭的大厅就再加 -LobbyUrl：
 #   powershell -ExecutionPolicy Bypass -File .\install-instorematch.ps1 `
-#       -GameDir "D:\game\maimai\SDEZ1.70\Package" `
-#       -LobbyUrl "http://你的服务器:20100"
-#
-# 注意：-GameDir 要指向 Sinmai.exe 所在的那一层（通常叫 Package）。
+#       -GameDir "<游戏根目录>" -LobbyUrl "http://你的服务器:20100"
 
 param(
-    [Parameter(Mandatory = $true)][string]$GameDir,
+    [string]$GameDir = "",
     [string]$LobbyUrl = "http://isakio.cn:20100"
 )
 
 $ErrorActionPreference = "Stop"
 
-if (-not (Test-Path (Join-Path $GameDir "Sinmai.exe"))) {
-    throw "-GameDir 里没有 Sinmai.exe：$GameDir`n要指向游戏根目录（Sinmai.exe 所在那层，一般叫 Package）"
+function Test-GameDir([string]$path) {
+    return [bool]($path -and (Test-Path (Join-Path $path "Sinmai.exe")))
 }
+
+# 没给 -GameDir 就自己找：当前目录往上 3 层 → 各盘符下常见的 game/maimai/SDEZ 目录（最多再下两层）
+if (-not (Test-GameDir $GameDir)) {
+    $candidates = New-Object System.Collections.ArrayList
+    $here = (Get-Location).Path
+    for ($i = 0; $i -lt 3 -and $here; $i++) {
+        [void]$candidates.Add($here)
+        $here = Split-Path $here -Parent
+    }
+    foreach ($root in (Get-PSDrive -PSProvider FileSystem -ErrorAction SilentlyContinue).Root) {
+        foreach ($d in (Get-ChildItem -Path $root -Directory -ErrorAction SilentlyContinue |
+                        Where-Object { $_.Name -in @("game", "Game", "maimai", "SDEZ", "Sinmai", "games") })) {
+            [void]$candidates.Add($d.FullName)
+            foreach ($d2 in (Get-ChildItem -Path $d.FullName -Directory -ErrorAction SilentlyContinue)) {
+                if (Test-GameDir $d2.FullName) { $GameDir = $d2.FullName; break }
+                foreach ($d3 in (Get-ChildItem -Path $d2.FullName -Directory -ErrorAction SilentlyContinue)) {
+                    if (Test-GameDir $d3.FullName) { $GameDir = $d3.FullName; break }
+                }
+                if ($GameDir) { break }
+            }
+            if ($GameDir) { break }
+        }
+        if ($GameDir) { break }
+    }
+    if (-not $GameDir) {
+        foreach ($c in $candidates) { if (Test-GameDir $c) { $GameDir = $c; break } }
+    }
+}
+
+# 还找不到就手动给（可以直接把文件夹拖进窗口）
+while (-not (Test-GameDir $GameDir)) {
+    Write-Host "没自动找到游戏目录。" -ForegroundColor Yellow
+    Write-Host "要找的是 Sinmai.exe 所在的那一层（通常叫 Package）。" -ForegroundColor Yellow
+    $GameDir = (Read-Host "把路径粘贴进来，或直接把文件夹拖进这个窗口").Trim('"').Trim()
+    if (-not $GameDir) { throw "没有提供游戏目录，已退出" }
+}
+Write-Host "[OK] 游戏目录: $GameDir" -ForegroundColor Green
+
 if (-not (Test-Path (Join-Path $GameDir "MelonLoader"))) {
-    throw "这个目录里没有 MelonLoader，请先装 MelonLoader 0.6.4"
+    throw "这个目录里没有 MelonLoader（$GameDir），请先装 MelonLoader 0.6.4"
 }
 
 $mods = Join-Path $GameDir "Mods"

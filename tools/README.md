@@ -143,7 +143,7 @@ MelonLoader + Harmony 插件（C# 5 语法，Windows 自带 csc 就能编）。
 编译（用 Windows 自带的 csc，不需要装 SDK）：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\build_instorematch.ps1 -Game "D:\game\maimai\SDEZ1.70\Package"
+powershell -ExecutionPolicy Bypass -File .\build_instorematch.ps1 -Game "<游戏根目录>"
 ```
 
 `-Game` 指向游戏根目录（`Sinmai.exe` 那一层）；源码默认读脚本旁边的 `InStoreMatch.cs`，

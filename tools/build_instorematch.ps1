@@ -1,19 +1,21 @@
 # Build InStoreMatch.dll with the csc.exe that ships with Windows.
 #
 #   powershell -ExecutionPolicy Bypass -File build_instorematch.ps1 `
-#       -Game "D:\game\maimai\SDEZ1.70\Package"
+#       -Game "<game root, the folder that contains Sinmai.exe>"
 #
-# Defaults to the game path above when -Game is omitted.
 # (English-only messages: Windows PowerShell 5.1 mis-reads non-BOM UTF-8 files.)
 
 param(
-    [string]$Game = "D:\game\maimai\SDEZ1.70\Package",
+    [string]$Game = "",
     [string]$Source = "",
     [string]$Out = ""
 )
 
 $ErrorActionPreference = "Stop"
 
+if ([string]::IsNullOrEmpty($Game)) {
+    throw "-Game is required: the game root folder (the one that contains Sinmai.exe)"
+}
 $Csc = "C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe"
 if ([string]::IsNullOrEmpty($Source)) { $Source = Join-Path $PSScriptRoot "InStoreMatch.cs" }
 if ([string]::IsNullOrEmpty($Out))    { $Out    = Join-Path $Game "Mods\InStoreMatch.dll" }

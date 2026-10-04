@@ -112,11 +112,12 @@ Disabled = true
 ```powershell
 git clone https://github.com/isakio/maimai-instore.git
 cd maimai-instore
-powershell -ExecutionPolicy Bypass -File .\client\install-instorematch.ps1 `
-    -GameDir "D:\game\maimai\SDEZ1.70\Package"
+powershell -ExecutionPolicy Bypass -File .\client\install-instorematch.ps1
 ```
 
-（不加 `-LobbyUrl` 就是默认的 `http://isakio.cn:20100`。）
+脚本会自己找游戏目录；找不到会提示你把文件夹拖进窗口，也可以直接指定：
+`-GameDir "<游戏根目录，就是 Sinmai.exe 那一层>"`。
+不加 `-LobbyUrl` 就是默认的 `http://isakio.cn:20100`。
 
 不想 clone 的话：从 [Release](https://github.com/isakio/maimai-instore/releases/latest)
 把两个 dll 下下来手动拷进 `Mods\`，再自己写那个 `WorldLink.toml` 也一样。
@@ -155,7 +156,7 @@ HOST_OVERRIDE=203.0.113.10 docker compose up -d --build
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\client\install-instorematch.ps1 `
-    -GameDir "D:\game\maimai\SDEZ1.70\Package" -LobbyUrl "http://203.0.113.10:20100"
+    -LobbyUrl "http://203.0.113.10:20100"
 ```
 
 > `--host-override`（脚本第一个参数）必须填**客户端能访问到的地址**：`/info` 会把它
