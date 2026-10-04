@@ -101,50 +101,53 @@ pkill -f fake_player.py        # 用完停掉
 注意 `--keychip` 必须和真客户端的 keychip 不同（默认 `W8888888888` 够用），
 `--music-id` 要选对方游戏里有的曲子。
 
-## WLDiag.cs —— 选曲界面诊断/修复插件
+## InStoreMatch.cs —— 「店内マッチング」修复插件
 
-针对「店内マッチング分类不显示」写的 MelonLoader 插件（v2）。它做三件事：
+MelonLoader + Harmony 插件（C# 5 语法，Windows 自带 csc 就能编）。
+装法看仓库根目录的 [README](../README.md)，这里说它内部干什么。
 
-1. **诊断**：打印 `GenreSelectDataList` 每项 `categoryID`，以及底部标签栏真正的数据
-   `SelectorTab._tabDatas`（项数 + 每项标题/是否有图标 + 左右格子数）
-2. **修复 A**：一旦 `GenreSelectDataList` 里出现 198，就照游戏自己的方式重拍 `_tabDatas`
-   （`build List<TabDataBase>` → `_genreTabController.SortType2Genre(list,0)` →
-   `Change(CurrentCategorySelect)`）
-3. **修复 B**：`CategoryNameList` 比 `GenreSelectDataList` 少一项时补上「店内マッチング」，
-   否则 `CategoryScrollRight/Left` 的滚动边界够不到最后一格
-4. **验证 C**：第一次对账通过后，把 `CurrentCategorySelect` 直接切到 198、再调
-   `Monitor.SetDeployList(0,0)` 刷新 —— 屏幕应该立刻跳到「店内マッチング」那一格。
-   这一步同时验证「屏幕上的标签栏到底是不是这个对象」。只做一次。
+**要解决的问题**：选曲界面底部那排分类标签里没有「店内マッチング」这一格。
+原因是标签栏画的是 `.SelectorTab._tabDatas`，**只在进入选曲界面时拍一次快照**，
+而 NyanLink 的 198 号分类是进界面之后才异步塞进数据的 —— 快照不会重拍。
 
-触发点：`reinputConnectCombineData` / `SetConnectData` 的 Postfix，外加 `OnUpdate` 里
-每帧对一次账（项数对不上才动手，最多每 30 帧试一次）。
+**它做的四件事**：
 
-日志里会打 `CategoryNameList=` / `CurrentCategorySelect=` / `_tabDatas=` 三个数，
-以及标签栏每格的标题（例：`… | TUVWXYZ[有图] | 数字・その他[有图] | 店内マッチング[有图]`）。
+| # | 做什么 | 挂在哪 |
+| --- | --- | --- |
+| 1 | 检测到 198 出现后，用游戏自己的方式重拍标签栏（`List<TabDataBase>` → `SortType2Genre` → `Change`） | `reinputConnectCombineData` / `SetConnectData` 的 Postfix，外加 `OnUpdate` 每 30 帧对一次账 |
+| 2 | 把「店内マッチング」补进 `CategoryNameList`（滚动边界用的是它的 `Count`，不补够不到最后一格） | 同上 |
+| 3 | 让「ジャンル」面板也画出那一格的大卡片（本体按分类名把它删掉） | `MusicSelectProcess.GetCategoryName` 的 Postfix（返回值缀一个零宽空格） |
+| 4 | 「ジャンル」面板的右箭头、联机分类里的 BACK（本体都写死不给） | `GenreSelectSequence.CheckButton` / `.Update`、`MusicSelectSequence.IsBackEnable` |
 
-> **2026-10-04 实测通过**：分类栏出现了「店内マッチング」，能进去、能看到房间。
-> 关键修正是 `SetDeployList` 的签名是 `(bool, bool)` —— 反射调用写死 `int` 会抛
-> `Int32 cannot be converted to Boolean`，那样只会切分类、不刷新标签栏，
-> 看起来就是「高亮偏半格、中间格子空白」。
->
-> 版本备注：v2.1 加 `AutoJump` 开关 + 清洗分类名换行；v2.2 加 `ShowRightArrow` /
-> `ShowBackButton`；v2.3 修正右箭头的边界（本体用了被减 1 的 count）；
-> v2.4 连"按下没反应"也一起修（`GenreSelectSequence.Update` 里同样的 count-1，
-> 做法是在这次 Update 期间临时借用 freedom 分支，Finalizer 负责还原）；
-> **v2.5 把 `AutoJump` 默认改成 false**（招募出现不再自动跳分类，手动切即可）。
->
-> 四个开关，改 `WLDiag.cs` 顶部重编即可：`AutoJump`（招募出现时自动切到店内联机）、
-> `ShowGenreCard`（面板里的「店内マッチング」大卡片）、`ShowRightArrow`（面板右箭头）、
-> `ShowBackButton`（联机分类里的 BACK）。
+**四个开关**（改 `InStoreMatch.cs` 顶部，重编生效）：
+
+| 开关 | 默认 | 作用 |
+| --- | --- | --- |
+| `AutoJump` | `false` | 招募出现时自动把分类切到「店内マッチング」 |
+| `ShowGenreCard` | `true` | 「ジャンル」面板里显示那一格的大卡片 |
+| `ShowRightArrow` | `true` | 面板站在倒数第二格也能往右切到最后 |
+| `ShowBackButton` | `true` | 联机分类里放回 BACK 按钮 |
+
+**诊断输出**：默认每 30 秒打一次状态（`CategoryNameList=` / `CurrentCategorySelect=` /
+`_tabDatas=`，以及标签栏每格实际显示的文字），日志前缀 `[InStoreMatch]`。
+
+**踩过的坑**（想改代码先看一眼）：
+
+- `Monitor.SetDeployList` 的签名是 **`(bool, bool)`** —— 反射调用写死 `int` 会抛
+  `Int32 cannot be converted to Boolean`，结果只切分类、不刷新标签栏
+  （现象：高亮偏半格、中间格子空白）
+- 本体在"非 freedom 模式"下会把分类数减 1（`count--`），**显示**（`CheckButton`）和
+  **按下后的响应**（`Update`）是两套独立判断，要一起改才不会"有箭头但点不动"
+- 分类名里带换行（`ゲーム＆\nバラエティ`），日志不清洗会被劈成好几行
 
 编译（用 Windows 自带的 csc，不需要装 SDK）：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\build_wldiag.ps1 -Game "D:\game\maimai\SDEZ1.70\Package"
+powershell -ExecutionPolicy Bypass -File .\build_instorematch.ps1 -Game "D:\game\maimai\SDEZ1.70\Package"
 ```
 
-`-Game` 指向游戏根目录（`Sinmai.exe` 那一层）；源码默认读脚本旁边的 `WLDiag.cs`，
-产物默认写到 `<Game>\Mods\WLDiag.dll`。文件带 UTF-8 BOM，中文日志才不会乱码。
+`-Game` 指向游戏根目录（`Sinmai.exe` 那一层）；源码默认读脚本旁边的 `InStoreMatch.cs`，
+产物默认写到 `<Game>\Mods\InStoreMatch.dll`。文件带 UTF-8 BOM，中文日志才不会乱码。
 
-编译产物会自动放到 `游戏目录\Mods\WLDiag.dll`。重启游戏后立刻生效，
-不想要了直接删掉那个 dll（还有一个 `WLDiag.dll` 同名文件不需要保留其它东西）。
+编译产物会自动放到 `游戏目录\Mods\InStoreMatch.dll`。重启游戏后立刻生效，
+不想要了直接删掉那个 dll（还有一个 `InStoreMatch.dll` 同名文件不需要保留其它东西）。

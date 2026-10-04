@@ -1,4 +1,4 @@
-# NyanLink Companion
+# maimai-instore
 
 [NyanLink](https://github.com/MuNET-OSS/NyanLink)（上游是 [MewoLab/worldlinkd](https://github.com/MewoLab/worldlinkd)）给
 maimai DX 提供了 C2C 联机。这个仓库是它的**配套补完**：把「店内マッチング」这个分类
@@ -7,7 +7,7 @@ maimai DX 提供了 C2C 联机。这个仓库是它的**配套补完**：把「�
 > **和 NyanLink 的关系**：这不是它的分支，也不包含它的源码或二进制 —— 但它**配套**它，
 > 服务端也是照着它的协议**重写**的：
 >
-> - `WLDiag` 是独立的 MelonLoader 插件，Harmony 补丁全部打在**游戏本体**
+> - `InStoreMatch` 是独立的 MelonLoader 插件，Harmony 补丁全部打在**游戏本体**
 >   （`Assembly-CSharp`）上，完全不碰 NyanLink 的 mod；
 > - `nyanlinkd` 是**重新实现**的大厅 + 中继（Python，零依赖），目标是不改 NyanLink 客户端
 >   一行就能连 —— 消息格式、命令号、伪 IP 算法都是从它的客户端 mod **逆向**出来的；
@@ -31,7 +31,7 @@ maimai DX 提供了 C2C 联机。这个仓库是它的**配套补完**：把「�
    所以那一格永远不存在。
 2. 滚动边界用的是 `CategoryNameList.Count`，这条路径也没同步补名字，导致最后一格够不到。
 
-`tools/WLDiag.cs`（编译成 `WLDiag.dll` 放进 `Mods/`）在检测到 198 号分类后，
+`tools/InStoreMatch.cs`（编译成 `InStoreMatch.dll` 放进 `Mods/`）在检测到 198 号分类后，
 用游戏自己的方式重拍标签栏并补齐边界。**两台机器都要装**。
 
 顺带还修了三处本体自己写死的边界问题：
@@ -48,11 +48,11 @@ maimai DX 提供了 C2C 联机。这个仓库是它的**配套补完**：把「�
 
 ```
 ├── client/
-│   ├── WLDiag.dll           ← 预编译好的修复插件（v2.5，SDEZ 1.70），下载即用
-│   └── install-wldiag.ps1   ← 一条命令：拷 DLL + 写 WorldLink.toml
+│   ├── InStoreMatch.dll           ← 预编译好的修复插件（v2.5，SDEZ 1.70），下载即用
+│   └── install-instorematch.ps1   ← 一条命令：拷 DLL + 写 WorldLink.toml
 ├── tools/
-│   ├── WLDiag.cs            ← 客户端修复插件（MelonLoader + Harmony，C# 5）
-│   ├── build_wldiag.ps1     ← 用 Windows 自带 csc.exe 编译，不需要装 SDK
+│   ├── InStoreMatch.cs            ← 客户端修复插件（MelonLoader + Harmony，C# 5）
+│   ├── build_instorematch.ps1     ← 用 Windows 自带 csc.exe 编译，不需要装 SDK
 │   ├── il.py                ← 反汇编 Assembly-CSharp.dll 的小工具
 │   ├── fake_player.py       ← 假玩家：不用真人就能测招募/进房
 │   └── README.md
@@ -80,7 +80,7 @@ maimai DX 提供了 C2C 联机。这个仓库是它的**配套补完**：把「�
 | 文件 | 从哪来 |
 | --- | --- |
 | `WorldLink.dll` | [NyanLink Releases](https://github.com/MuNET-OSS/NyanLink/releases)（本仓库不分发）。两边要用同一个文件：50176 字节 / md5 `9dfa62d5cba41deac0c2c74334ef8371` |
-| `WLDiag.dll` | 本仓库 [`client/WLDiag.dll`](client/WLDiag.dll)（预编译，v2.5，对应 SDEZ 1.70） |
+| `InStoreMatch.dll` | 本仓库 [`client/InStoreMatch.dll`](client/InStoreMatch.dll)（预编译，v2.5，对应 SDEZ 1.70） |
 
 **2. 在游戏根目录（`Sinmai.exe` 那一层）放 `WorldLink.toml`**
 
@@ -104,9 +104,9 @@ Disabled = true
 上面 1~2 步可以一条命令做完：
 
 ```powershell
-git clone https://github.com/isakio/NyanLink-Companion.git
-cd NyanLink-Companion
-powershell -ExecutionPolicy Bypass -File .\client\install-wldiag.ps1 `
+git clone https://github.com/isakio/maimai-instore.git
+cd maimai-instore
+powershell -ExecutionPolicy Bypass -File .\client\install-instorematch.ps1 `
     -GameDir "D:\game\maimai\SDEZ1.70\Package"
 ```
 
@@ -116,8 +116,8 @@ powershell -ExecutionPolicy Bypass -File .\client\install-wldiag.ps1 `
 
 ```
 [NyanLink] WorldLink server address: isakio.cn:20101
-[WLDiag] v2.5 已加载（...）
-[WLDiag] 挂钩成功: reinputConnectCombineData ...（共 7 行“挂钩成功”）
+[InStoreMatch] v2.5 已加载（...）
+[InStoreMatch] 挂钩成功: reinputConnectCombineData ...（共 7 行“挂钩成功”）
 ```
 
 ### 方式 B：自己搭服务器（不想连我那台，或者想开给一群人）
@@ -125,7 +125,7 @@ powershell -ExecutionPolicy Bypass -File .\client\install-wldiag.ps1 `
 `nyanlinkd` 只用 Python 标准库，一台有公网 IP 的 Linux 5 分钟搞定。
 
 ```bash
-git clone https://github.com/isakio/NyanLink-Companion.git && cd NyanLink-Companion
+git clone https://github.com/isakio/maimai-instore.git && cd maimai-instore
 
 # 把 203.0.113.10 换成你的公网 IP 或域名
 sudo bash nyanlinkd/install.sh 203.0.113.10
@@ -138,14 +138,14 @@ sudo bash nyanlinkd/install.sh 203.0.113.10
 也可以用 Docker：
 
 ```bash
-cd NyanLink-Companion/nyanlinkd
+cd maimai-instore/nyanlinkd
 HOST_OVERRIDE=203.0.113.10 docker compose up -d --build
 ```
 
 客户端那边把 `-LobbyUrl` / `WorldLink.toml` 的地址换成你自己的：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\client\install-wldiag.ps1 `
+powershell -ExecutionPolicy Bypass -File .\client\install-instorematch.ps1 `
     -GameDir "D:\game\maimai\SDEZ1.70\Package" -LobbyUrl "http://203.0.113.10:20100"
 ```
 

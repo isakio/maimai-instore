@@ -1,6 +1,6 @@
-# Build WLDiag.dll with the csc.exe that ships with Windows.
+# Build InStoreMatch.dll with the csc.exe that ships with Windows.
 #
-#   powershell -ExecutionPolicy Bypass -File build_wldiag.ps1 `
+#   powershell -ExecutionPolicy Bypass -File build_instorematch.ps1 `
 #       -Game "D:\game\maimai\SDEZ1.70\Package"
 #
 # Defaults to the game path above when -Game is omitted.
@@ -15,8 +15,8 @@ param(
 $ErrorActionPreference = "Stop"
 
 $Csc = "C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe"
-if ([string]::IsNullOrEmpty($Source)) { $Source = Join-Path $PSScriptRoot "WLDiag.cs" }
-if ([string]::IsNullOrEmpty($Out))    { $Out    = Join-Path $Game "Mods\WLDiag.dll" }
+if ([string]::IsNullOrEmpty($Source)) { $Source = Join-Path $PSScriptRoot "InStoreMatch.cs" }
+if ([string]::IsNullOrEmpty($Out))    { $Out    = Join-Path $Game "Mods\InStoreMatch.dll" }
 
 if (-not (Test-Path $Csc))    { throw "csc.exe not found: $Csc" }
 if (-not (Test-Path $Source)) { throw "source not found: $Source" }
@@ -48,7 +48,7 @@ Invoke-Expression $cmd
 
 if (Test-Path $Out) {
     Write-Host "`nBUILD OK -> $Out" -ForegroundColor Green
-    Write-Host "Restart the game and look for [WLDiag] lines in MelonLoader\Logs\Latest.log" -ForegroundColor Green
+    Write-Host "Restart the game and look for [InStoreMatch] lines in MelonLoader\Logs\Latest.log" -ForegroundColor Green
 } else {
     Write-Host "`nBUILD FAILED - see errors above." -ForegroundColor Red
 }

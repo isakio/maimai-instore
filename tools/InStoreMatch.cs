@@ -1,4 +1,4 @@
-﻿// WLDiag v2 —— 选曲界面「店内マッチング」分类诊断 / 修复插件
+﻿// InStoreMatch v2 —— 选曲界面「店内マッチング」分类诊断 / 修复插件
 //
 // 【本轮结论（反汇编 Assembly-CSharp.dll 得到，已确认）】
 //
@@ -45,12 +45,12 @@ using MelonLoader;
 using UnityEngine;          // Color / Sprite
 using Process;              // MusicSelectProcess
 
-[assembly: MelonInfo(typeof(WLDiag.WLDiagMod), "WLDiag", "2.5.0", "isakio")]
+[assembly: MelonInfo(typeof(InStoreMatch.InStoreMatchMod), "InStoreMatch", "2.5.0", "isakio")]
 [assembly: MelonGame("sega-interactive", "Sinmai")]
 
-namespace WLDiag
+namespace InStoreMatch
 {
-    public class WLDiagMod : MelonMod
+    public class InStoreMatchMod : MelonMod
     {
         // 玩法开关：招募出现时自动把分类切到「店内マッチング」。
         // 默认关：自动跳有点唐突，现在分类栏/面板都能手动切过去（v2.3/v2.4 修好的箭头）。
@@ -73,7 +73,7 @@ namespace WLDiag
 
         public override void OnInitializeMelon()
         {
-            MelonLogger.Msg("[WLDiag] v2.5 已加载（重拍标签栏 _tabDatas + 补滚动边界；AutoJump="
+            MelonLogger.Msg("[InStoreMatch] v2.5 已加载（重拍标签栏 _tabDatas + 补滚动边界；AutoJump="
                 + AutoJump + "，ShowGenreCard=" + ShowGenreCard
                 + "，ShowRightArrow=" + ShowRightArrow
                 + "，ShowBackButton=" + ShowBackButton + "）");
@@ -91,11 +91,11 @@ namespace WLDiag
             try
             {
                 HarmonyLib.Harmony.CreateAndPatchAll(t);
-                MelonLogger.Msg("[WLDiag] 挂钩成功: " + label);
+                MelonLogger.Msg("[InStoreMatch] 挂钩成功: " + label);
             }
             catch (Exception e)
             {
-                MelonLogger.Msg("[WLDiag] 挂钩失败 " + label + ": " + e.Message);
+                MelonLogger.Msg("[InStoreMatch] 挂钩失败 " + label + ": " + e.Message);
             }
         }
 
@@ -204,7 +204,7 @@ namespace WLDiag
 
                 if (arr == null || arr.Length == 0)
                 {
-                    MelonLogger.Msg("[WLDiag] GenreSelectDataList 为空");
+                    MelonLogger.Msg("[InStoreMatch] GenreSelectDataList 为空");
                     return;
                 }
 
@@ -218,13 +218,13 @@ namespace WLDiag
                         sb.Append(CategoryIdOf(sub[k]));
                         if (k != sub.Count - 1) sb.Append(",");
                     }
-                    MelonLogger.Msg("[WLDiag] 监视器" + i + " genre数据 " + sub.Count
+                    MelonLogger.Msg("[InStoreMatch] 监视器" + i + " genre数据 " + sub.Count
                         + " 项 -> " + sb.ToString());
                 }
 
                 IList names = Prop(p, "CategoryNameList") as IList;
                 object curSel = Prop(p, "CurrentCategorySelect");
-                MelonLogger.Msg("[WLDiag] connectList=" + connectCount
+                MelonLogger.Msg("[InStoreMatch] connectList=" + connectCount
                     + " CategoryNameList=" + (names == null ? -1 : names.Count)
                     + " CurrentCategorySelect=" + (curSel == null ? "?" : curSel.ToString())
                     + " connectEnable=" + (Prop(p, "IsConnectCategoryEnable") == null
@@ -233,7 +233,7 @@ namespace WLDiag
             }
             catch (Exception e)
             {
-                MelonLogger.Msg("[WLDiag] 状态输出失败: " + e.Message);
+                MelonLogger.Msg("[InStoreMatch] 状态输出失败: " + e.Message);
             }
         }
 
@@ -250,13 +250,13 @@ namespace WLDiag
                 object selTab = Field(tabCtrl, "_tab");
                 if (selTab == null)
                 {
-                    MelonLogger.Msg("[WLDiag] 监视器" + i + " 标签栏对象为空");
+                    MelonLogger.Msg("[InStoreMatch] 监视器" + i + " 标签栏对象为空");
                     continue;
                 }
                 IList datas = Field(selTab, "_tabDatas") as IList;
                 if (datas == null)
                 {
-                    MelonLogger.Msg("[WLDiag] 监视器" + i + " _tabDatas=null");
+                    MelonLogger.Msg("[InStoreMatch] 监视器" + i + " _tabDatas=null");
                     continue;
                 }
                 Array left = Field(selTab, "_leftPanels") as Array;
@@ -274,7 +274,7 @@ namespace WLDiag
                     sb.Append(sprite == null ? "[无图]" : "[有图]");
                     if (k != datas.Count - 1) sb.Append(" | ");
                 }
-                MelonLogger.Msg("[WLDiag] 监视器" + i + " 标签栏 _tabDatas="
+                MelonLogger.Msg("[InStoreMatch] 监视器" + i + " 标签栏 _tabDatas="
                     + datas.Count + " 项，左" + lc + "/右" + rc + " -> " + sb.ToString());
 
                 // 把每格「实际显示的文字」读回来，确认屏幕上的窗口停在哪
@@ -288,7 +288,7 @@ namespace WLDiag
                 if (right != null)
                     for (int k = 0; k < right.Length; k++)
                         scr.Append(" | ").Append(PanelText(right.GetValue(k)));
-                MelonLogger.Msg("[WLDiag] 监视器" + i + " 屏幕标签栏: " + scr.ToString());
+                MelonLogger.Msg("[InStoreMatch] 监视器" + i + " 屏幕标签栏: " + scr.ToString());
             }
         }
 
@@ -391,7 +391,7 @@ namespace WLDiag
                         tabDataType = typeof(MusicSelectProcess).Assembly.GetType("TabDataBase");
                     if (tabDataType == null)
                     {
-                        MelonLogger.Msg("[WLDiag] 找不到 TabDataBase 类型");
+                        MelonLogger.Msg("[InStoreMatch] 找不到 TabDataBase 类型");
                         return 0;
                     }
                     if (listType == null)
@@ -430,7 +430,7 @@ namespace WLDiag
                 }
                 catch (Exception e)
                 {
-                    MelonLogger.Msg("[WLDiag] 监视器" + i + " 重建失败: " + e.Message);
+                    MelonLogger.Msg("[InStoreMatch] 监视器" + i + " 重建失败: " + e.Message);
                 }
             }
             return done;
@@ -524,18 +524,18 @@ namespace WLDiag
                 int need = genreCount - names.Count;
                 if (need > 4)
                 {
-                    MelonLogger.Msg("[WLDiag] CategoryNameList 只差得太多（"
+                    MelonLogger.Msg("[InStoreMatch] CategoryNameList 只差得太多（"
                         + names.Count + " vs " + genreCount + "），跳过不补");
                     return;
                 }
                 string nm = ConnectName();
                 for (int k = 0; k < need; k++) names.Add(nm);
-                MelonLogger.Msg("[WLDiag] CategoryNameList 补齐 " + need + " 项 -> "
+                MelonLogger.Msg("[InStoreMatch] CategoryNameList 补齐 " + need + " 项 -> "
                     + names.Count + " 项（滚动边界现在能到最后）");
             }
             catch (Exception e)
             {
-                MelonLogger.Msg("[WLDiag] EnsureConnectName 失败: " + e.Message);
+                MelonLogger.Msg("[InStoreMatch] EnsureConnectName 失败: " + e.Message);
             }
         }
 
@@ -585,14 +585,14 @@ namespace WLDiag
                     deploy.Invoke(mon, dargs);
                 }
 
-                MelonLogger.Msg("[WLDiag] 已强制切入「店内マッチング」：CurrentCategorySelect="
+                MelonLogger.Msg("[InStoreMatch] 已强制切入「店内マッチング」：CurrentCategorySelect="
                     + idx + " / " + (sub.Count - 1) + "，SetDeployList="
                     + (deploy != null ? "ok" : "找不到"));
                 DumpTabBar(p);
             }
             catch (Exception e)
             {
-                MelonLogger.Msg("[WLDiag] TryJumpToConnect 失败: " + e.Message);
+                MelonLogger.Msg("[InStoreMatch] TryJumpToConnect 失败: " + e.Message);
                 _jumped = true;
             }
         }
@@ -625,7 +625,7 @@ namespace WLDiag
                 _lastTabCount = TabDataCount(p);
                 IList nm = Prop(p, "CategoryNameList") as IList;
                 object cs = Prop(p, "CurrentCategorySelect");
-                MelonLogger.Msg("[WLDiag] 重拍标签栏(" + why + ")：genre=" + genreCount
+                MelonLogger.Msg("[InStoreMatch] 重拍标签栏(" + why + ")：genre=" + genreCount
                     + " CategoryNameList=" + (nm == null ? -1 : nm.Count)
                     + " CurrentCategorySelect=" + (cs == null ? "?" : cs.ToString())
                     + "，重建 " + done + " 个监视器，重建后 _tabDatas="
@@ -635,7 +635,7 @@ namespace WLDiag
             }
             catch (Exception e)
             {
-                MelonLogger.Msg("[WLDiag] MaybeRebuild 失败: " + e.Message);
+                MelonLogger.Msg("[InStoreMatch] MaybeRebuild 失败: " + e.Message);
             }
         }
 
@@ -696,7 +696,7 @@ namespace WLDiag
                     if (!_logged)
                     {
                         _logged = true;
-                        MelonLogger.Msg("[WLDiag] 已放开「店内マッチング」大卡片（GetCategoryName 加零宽空格）");
+                        MelonLogger.Msg("[InStoreMatch] 已放开「店内マッチング」大卡片（GetCategoryName 加零宽空格）");
                     }
                 }
                 catch (Exception) { }
@@ -788,7 +788,7 @@ namespace WLDiag
                         if (!_logged)
                         {
                             _logged = true;
-                            MelonLogger.Msg("[WLDiag] 面板右键已改按真实分类数判断"
+                            MelonLogger.Msg("[InStoreMatch] 面板右键已改按真实分类数判断"
                                 + "（本次 Update 临时借用 freedom 分支）");
                         }
                     }
@@ -829,7 +829,7 @@ namespace WLDiag
                         if (!_backLogged)
                         {
                             _backLogged = true;
-                            MelonLogger.Msg("[WLDiag] 已在「店内マッチング」里放回 BACK 按钮");
+                            MelonLogger.Msg("[InStoreMatch] 已在「店内マッチング」里放回 BACK 按钮");
                         }
                     }
                 }

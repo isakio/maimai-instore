@@ -1,16 +1,16 @@
-# WLDiag 安装脚本（Windows / PowerShell）
+# InStoreMatch 安装脚本（Windows / PowerShell）
 #
 # 作用：
-#   1. 把仓库里的 WLDiag.dll 复制到 <游戏目录>\Mods\
+#   1. 把仓库里的 InStoreMatch.dll 复制到 <游戏目录>\Mods\
 #   2. 生成 <游戏目录>\WorldLink.toml（默认指向 isakio.cn 的公共大厅）
 #   3. 打印剩下需要手动做的 3 件事
 #
 # 用法（连公共大厅，最省事）：
-#   powershell -ExecutionPolicy Bypass -File .\install-wldiag.ps1 `
+#   powershell -ExecutionPolicy Bypass -File .\install-instorematch.ps1 `
 #       -GameDir "D:\game\maimai\SDEZ1.70\Package"
 #
 # 想连自己搭的大厅，就加 -LobbyUrl：
-#   powershell -ExecutionPolicy Bypass -File .\install-wldiag.ps1 `
+#   powershell -ExecutionPolicy Bypass -File .\install-instorematch.ps1 `
 #       -GameDir "D:\game\maimai\SDEZ1.70\Package" `
 #       -LobbyUrl "http://你的服务器:20100"
 #
@@ -33,11 +33,11 @@ if (-not (Test-Path (Join-Path $GameDir "MelonLoader"))) {
 $mods = Join-Path $GameDir "Mods"
 New-Item -ItemType Directory -Force -Path $mods | Out-Null
 
-Copy-Item (Join-Path $PSScriptRoot "WLDiag.dll") (Join-Path $mods "WLDiag.dll") -Force
-Write-Host "[OK] WLDiag.dll -> $mods\WLDiag.dll" -ForegroundColor Green
+Copy-Item (Join-Path $PSScriptRoot "InStoreMatch.dll") (Join-Path $mods "InStoreMatch.dll") -Force
+Write-Host "[OK] InStoreMatch.dll -> $mods\InStoreMatch.dll" -ForegroundColor Green
 
 $toml = @"
-# 由 install-wldiag.ps1 生成
+# 由 install-instorematch.ps1 生成
 LobbyUrl="$LobbyUrl"
 Debug=false
 "@
@@ -54,7 +54,7 @@ Write-Host "  3) 进 Test 模式（按住 F1）→ ゲーム設定："
 Write-Host "     店内マッチングの設定 = ON，グループ内基準機の設定 = 基準機"
 Write-Host ""
 Write-Host "启动游戏后看 MelonLoader\Logs\Latest.log，应出现：" -ForegroundColor Cyan
-Write-Host "  [WLDiag] v2.5 已加载 ...  和 7 行 [WLDiag] 挂钩成功"
+Write-Host "  [InStoreMatch] v2.5 已加载 ...  和 7 行 [InStoreMatch] 挂钩成功"
 Write-Host ""
 Write-Host "（想自己搭大厅：仓库里 nyanlinkd/install.sh 一条命令就够，"
 Write-Host "  然后把 -LobbyUrl 换成你自己的地址。）" -ForegroundColor DarkGray

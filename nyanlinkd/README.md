@@ -99,7 +99,7 @@ sudo userdel nyanlinkd
 
 服务端只负责**大厅列表 + 中继转发**，它不参与游戏画面的任何事。
 「选曲界面不显示店内マッチング分类」那个问题在客户端侧，由本仓库的
-[`tools/WLDiag.cs`](../tools/WLDiag.cs)（编译产物 `client/WLDiag.dll`）解决。
+[`tools/InStoreMatch.cs`](../tools/InStoreMatch.cs)（编译产物 `client/InStoreMatch.dll`）解决。
 
 排查时它可以帮你**看清数据流**：打开看板，如果对方开房时「当前房间」里出现了记录、
 「在线玩家」里两个人都亮着，就说明服务端这边一切正常，问题在客户端。
