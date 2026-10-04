@@ -8,17 +8,16 @@
 maimai DX 提供了 C2C 联机。本仓库是给它的**配套工具**：一个客户端插件，让选曲界面
 底部的「店内マッチング」直接可用；另外附一份自研的大厅 + 中继服务端（协议兼容，零依赖）。
 
-> **和 NyanLink 的关系**：这不是它的分支，也不包含它的源码或二进制 —— 但它**配套**它，
-> 服务端也是照着它的协议**重写**的：
+> **和 NyanLink 的关系**：这不是它的分支 —— 但它**配套**它，服务端也是照着它的协议**重写**的：
 >
 > - `InStoreMatch` 是独立的 MelonLoader 插件，Harmony 补丁全部打在**游戏本体**
 >   （`Assembly-CSharp`）上，完全不碰 NyanLink 的 mod；
 > - `instorematchd` 是**重新实现**的大厅 + 中继（Python，零依赖），目标是不改 NyanLink 客户端
 >   一行就能连 —— 消息格式、命令号、伪 IP 算法都是从它的客户端 mod **逆向**出来的；
-> - NyanLink 的客户端 mod（`WorldLink.dll`）请从
->   [官方 release](https://github.com/MuNET-OSS/NyanLink/releases) 下载 —— 为了方便，
->   本仓库也原样收录了一份（`client/WorldLink.dll`，出处与许可见
->   [`third_party/NyanLink/`](third_party/NyanLink/README.md)）。
+> - NyanLink 的客户端 mod（`WorldLink.dll`）在 [`client/`](client/) 里**原样带了一份**，
+>   方便一次装完 —— 它的代码不是我们的，出处与许可见
+>   [`third_party/NyanLink/`](third_party/NyanLink/README.md)（也可以直接去
+>   [官方 release](https://github.com/MuNET-OSS/NyanLink/releases) 下载）。
 >
 > License 都是 MIT（沿革：`MewoLab/worldlinkd` → `Japerz12138/worldlinkd` → `MuNET-OSS/NyanLink`）。
 
@@ -206,5 +205,7 @@ LobbyUrl="http://203.0.113.10:20100"
 
 ## License
 
-MIT（见 [LICENSE](LICENSE)）。本仓库只包含我们自己写的代码；NyanLink 及其上游的
-代码与二进制遵循其各自的许可。
+- **我们自己的部分**（`tools/`、`instorematchd/`、`client/InStoreMatch.dll`、文档）：MIT，见 [LICENSE](LICENSE)。
+- **`client/WorldLink.dll`**：这是 NyanLink 的构建产物，我们原样收录、没有改动。
+  它遵循 NyanLink 自己的 MIT 许可，版权归其作者（Copyright (c) 2025 Azalea）；
+  许可全文与出处说明在 [`third_party/NyanLink/`](third_party/NyanLink/README.md)。
