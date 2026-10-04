@@ -1,0 +1,22 @@
+# 备选方案：用 Docker 跑 nyanlinkd。
+# 好处是不用管 Python；坏处是要从 Docker Hub 拉 python 镜像（国内可能很慢）。
+# 部署目录建议 /opt/nyanlinkd
+services:
+  nyanlinkd:
+    image: python:3.12-alpine
+    container_name: nyanlinkd
+    restart: unless-stopped
+    ports:
+      - "20100:20100"
+      - "20101:20101"
+    volumes:
+      - ./nyanlinkd.py:/app/nyanlinkd.py:ro
+    command:
+      - python
+      - /app/nyanlinkd.py
+      - --host-override
+      - isakio.cn
+      - --lobby-port
+      - "20100"
+      - --relay-port
+      - "20101"

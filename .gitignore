@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+*.pyo
+
+# 编译产物 / 打包文件
+*.dll
+*.zip
+*.pdb
+
+# 日志与截图（含个人信息，不要入库）
+logs/
+*.log
+*.jpg
+*.jpeg
+*.png

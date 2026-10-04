@@ -1,0 +1,32 @@
+# nyanlinkd systemd 服务单元
+# 安装：sudo cp nyanlinkd.service /etc/systemd/system/ && sudo systemctl daemon-reload
+[Unit]
+Description=nyanlinkd (WorldLink / NyanLink compatible lobby + relay)
+After=network.target
+
+[Service]
+Type=simple
+User=isakio
+Group=isakio
+WorkingDirectory=/opt/nyanlinkd
+
+# --host-override 必须填你的域名：/info 会把它作为中继地址返回给客户端，
+# 不填的话走反向代理时客户端会拿到 127.0.0.1 而连不上中继
+ExecStart=/usr/bin/python3 /opt/nyanlinkd/nyanlinkd.py \
+    --host-override isakio.cn \
+    --lobby-port 20100 \
+    --relay-port 20101 \
+    --recruit-ttl 30 \
+    --heartbeat-timeout 30
+
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=nyanlinkd
+
+[Install]
+WantedBy=multi-user.target
