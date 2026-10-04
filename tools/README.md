@@ -66,11 +66,11 @@ Monitor.MusicSelectMonitor._genreTabController   (.GenreSelectController : .TabC
   `genreName` = `genreNameTwoLine` = `店内マッチング`，
   `FileName` = `UI_CMN_TabTitle_NetworkBattle`，Color = RGB(67,89,255)，`disable=false`。
 
-### NyanLink 为什么看不到这一格（最终结论）
+### 为什么这一格一开始画不出来（最终结论）
 
 1. 玩家进入选曲界面时 `OnStartMusicSelect()` 已经按当时的 `_genreSelectDataList`
    拍好了 `_tabDatas`（那时招募数据还没来，198 不在里面，`_currentExtraCategoryCount=4`）。
-2. 之后 mod 把 198 异步塞进 `_genreSelectDataList`，但没有任何代码重拍 `_tabDatas`。
+2. 之后 198 才异步进到 `_genreSelectDataList`，而没有任何代码重拍 `_tabDatas`。
 3. 而且 `CategoryNameList` 也没补，导致 `CategoryNameList.Count` 比
    `_genreSelectDataList.Count` 少 1，**滚动边界**还够不到最后一格。
 
@@ -101,14 +101,14 @@ pkill -f fake_player.py        # 用完停掉
 注意 `--keychip` 必须和真客户端的 keychip 不同（默认 `W8888888888` 够用），
 `--music-id` 要选对方游戏里有的曲子。
 
-## InStoreMatch.cs —— 「店内マッチング」修复插件
+## InStoreMatch.cs —— 「店内マッチング」客户端插件
 
 MelonLoader + Harmony 插件（C# 5 语法，Windows 自带 csc 就能编）。
 装法看仓库根目录的 [README](../README.md)，这里说它内部干什么。
 
-**要解决的问题**：选曲界面底部那排分类标签里没有「店内マッチング」这一格。
-原因是标签栏画的是 `.SelectorTab._tabDatas`，**只在进入选曲界面时拍一次快照**，
-而 NyanLink 的 198 号分类是进界面之后才异步塞进数据的 —— 快照不会重拍。
+**它要处理的机制**：选曲界面底部那排分类标签画的是 `.SelectorTab._tabDatas`，
+**只在进入界面时拍一次快照**；联机的 198 号分类（店内マッチング）是之后才随着
+大厅数据出现的 —— 快照不会重拍，那一格就画不出来。
 
 **它做的四件事**：
 

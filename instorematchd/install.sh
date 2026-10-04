@@ -8,8 +8,7 @@
 #
 # 装完记得在防火墙 / 云厂商安全组放行这两个 TCP 端口。
 #
-# 幂等：重跑即升级。如果机器上还跑着更早的 `nyanlinkd`（旧名字），
-# 脚本会先把它停掉，避免两个服务抢 20100/20101。
+# 幂等：重跑即升级（会 restart，所以新拷贝的代码一定生效）。
 set -euo pipefail
 
 HOST_OVERRIDE="${1:-}"
@@ -35,21 +34,20 @@ if ! "$PY" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)' 2>
     exit 1
 fi
 
-echo "==> 1/5 创建服务账号与目录 $DIR"
+# 端口预检：被别的进程占着的话，新服务只会一直 auto-restart，这里直接说清楚。
+# （别写成 `... | grep -q`：grep -q 匹配到就退出，上游进程收到 SIGPIPE(141)，
+#   在 set -o pipefail 下整条管道会被判成失败，条件永远不成立 —— 踩过。）
+for p in "$LOBBY_PORT" "$RELAY_PORT"; do
+    holder="$(ss -tlnpH 2>/dev/null | awk -v pat=":$p\$" '$4 ~ pat' | tr '\n' ' ')"
+    if [ -n "$holder" ]; then
+        echo "!! TCP $p 已经被占用：" >&2
+        echo "   $holder" >&2
+        echo "   先停掉占用它的服务或进程（如果是之前用别的名字部署的同一套服务，先 disable --now 那个单元），再重跑本脚本。" >&2
+        exit 1
+    fi
+done
 
-# 更早的版本叫 nyanlinkd（单元名和服务名不同），不处理的话两个进程会抢端口。
-#
-# 注意别写成 `systemctl list-unit-files | grep -q ...`：grep -q 匹配到就退出，
-# systemctl 收到 SIGPIPE（141），在 set -o pipefail 下整条管道会被判成失败，
-# 于是这里永远不成立。（踩过）
-if [ -f /etc/systemd/system/nyanlinkd.service ] \
-   || systemctl cat nyanlinkd.service >/dev/null 2>&1; then
-    echo "    检测到旧的 nyanlinkd 服务，先停掉它（避免端口冲突）"
-    systemctl disable --now nyanlinkd || true
-    rm -f /etc/systemd/system/nyanlinkd.service
-    systemctl daemon-reload
-    echo "    旧目录 /opt/nyanlinkd 不再使用，确认没问题后可以自行删除"
-fi
+echo "==> 1/5 创建服务账号与目录 $DIR"
 
 id -u instorematchd >/dev/null 2>&1 || useradd --system --no-create-home \
     --shell /usr/sbin/nologin instorematchd
