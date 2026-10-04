@@ -149,5 +149,28 @@ powershell -ExecutionPolicy Bypass -File .\build_instorematch.ps1 -Game "D:\game
 `-Game` 指向游戏根目录（`Sinmai.exe` 那一层）；源码默认读脚本旁边的 `InStoreMatch.cs`，
 产物默认写到 `<Game>\Mods\InStoreMatch.dll`。文件带 UTF-8 BOM，中文日志才不会乱码。
 
-编译产物会自动放到 `游戏目录\Mods\InStoreMatch.dll`。重启游戏后立刻生效，
-不想要了直接删掉那个 dll（还有一个 `InStoreMatch.dll` 同名文件不需要保留其它东西）。
+编译产物会直接写进 `游戏目录\Mods\InStoreMatch.dll`，重启游戏立刻生效；
+不想要了把那个 dll 删掉即可（`Mods\` 里同时存在新旧两份插件会导致补丁打两遍，
+换版本时记得先删旧的）。
+
+### 发新版本
+
+1. 改 `InStoreMatch.cs` 顶部的版本号（`[assembly: MelonInfo(...)]` 第三个参数）和开关
+2. 编译：
+
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File .\build_instorematch.ps1 -Game "<游戏目录>"
+   ```
+
+3. 把产物拷回仓库并提交：
+
+   ```bash
+   cp "<游戏目录>/Mods/InStoreMatch.dll" client/InStoreMatch.dll
+   git commit -am "InStoreMatch vX.Y" && git push
+   ```
+
+4. 打 Release（把 dll 挂上去，README / 文档里的版本号记得一起改）：
+
+   ```bash
+   gh release create vX.Y client/InStoreMatch.dll --title "InStoreMatch vX.Y" --notes "..."
+   ```

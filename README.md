@@ -16,8 +16,9 @@ maimai DX 提供了 C2C 联机。这个仓库是它的**配套补完**：把「�
 >
 > License 都是 MIT（沿革：`MewoLab/worldlinkd` → `Japerz12138/worldlinkd` → `MuNET-OSS/NyanLink`）。
 
-**只想玩？** 我们有一台已经跑着的大厅 `http://isakio.cn:20100`，装完客户端就能连 ——
-看下面的「方式 A」。想自己开一台，看「方式 B」。
+**只想玩？** 我们有一台已经跑着的大厅 `http://isakio.cn:20100` —— 去
+[**最新 Release**](https://github.com/isakio/maimai-instore/releases/latest) 下载
+`InStoreMatch.dll`，照着下面的「方式 A」做就行。想自己开一台，看「方式 B」。
 
 ## 解决的问题
 
@@ -79,7 +80,7 @@ maimai DX 提供了 C2C 联机。这个仓库是它的**配套补完**：把「�
 | 文件 | 从哪来 |
 | --- | --- |
 | `WorldLink.dll` | [NyanLink Releases](https://github.com/MuNET-OSS/NyanLink/releases)（本仓库不分发）。两边要用同一个文件：50176 字节 / md5 `9dfa62d5cba41deac0c2c74334ef8371` |
-| `InStoreMatch.dll` | 本仓库 [`client/InStoreMatch.dll`](client/InStoreMatch.dll)（预编译，v2.5，对应 SDEZ 1.70） |
+| `InStoreMatch.dll` | 本仓库 [**最新 Release**](https://github.com/isakio/maimai-instore/releases/latest) 下载（v2.5，18432 字节 / md5 `1a94a9b6be9b03bfb274e41b0a8256b3`）。仓库里的 [`client/InStoreMatch.dll`](client/InStoreMatch.dll) 是同一份 |
 
 **2. 在游戏根目录（`Sinmai.exe` 那一层）放 `WorldLink.toml`**
 
@@ -100,7 +101,7 @@ Disabled = true
 **4. 进 Test 模式设两项**：按住 `F1` → `ゲーム設定` →
 `店内マッチングの設定` = **ON**，`グループ内基準機の設定` = **基準機**，然后重启游戏。
 
-上面 1~2 步可以一条命令做完：
+上面 1~2 步可以一条命令做完（脚本会用仓库里的 `client/InStoreMatch.dll`）：
 
 ```powershell
 git clone https://github.com/isakio/maimai-instore.git
@@ -110,6 +111,9 @@ powershell -ExecutionPolicy Bypass -File .\client\install-instorematch.ps1 `
 ```
 
 （不加 `-LobbyUrl` 就是默认的 `http://isakio.cn:20100`。）
+
+不想 clone 的话：从 [Release](https://github.com/isakio/maimai-instore/releases/latest)
+把 `InStoreMatch.dll` 下下来，手动拷进 `Mods\`，再自己写那个 `WorldLink.toml` 也一样。
 
 **验收**：`MelonLoader\Logs\Latest.log` 里应该有
 
