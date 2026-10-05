@@ -174,6 +174,24 @@ static bool DefineEnv()
     return SetEnvironmentVariableW(L"OPENSSL_ia32cap", L":~0x20000000") != 0;
 }
 
+// Steam exports SteamAppId / SteamGameId / SteamOverlayGameId / SteamClientLaunch
+// into the process it launches, and everything we start inherits them. Measured:
+// with those set, placing mai2hook.dll into amdaemon fails every single time
+// ("DLL failed to load inside target process"); with them unset the exact same
+// chain works in about a second. So drop them for our children -- that makes
+// them identical to a hand-started session. (Steam tracks the process it
+// launched, so removing the variables does not affect the "playing" state.)
+static void ClearSteamEnv()
+{
+    const wchar_t* vars[] = {
+        L"SteamAppId", L"SteamGameId", L"SteamOverlayGameId", L"SteamClientLaunch",
+        L"SteamAppUser", L"SteamUser", L"SteamPath", L"SteamClientDll",
+        L"SteamClientDll64", L"SteamGameIdFile",
+    };
+    for (const wchar_t* v : vars) SetEnvironmentVariableW(v, nullptr);
+    Log("cleared Steam* environment variables for the child processes");
+}
+
 // Dump the things that differ between "launched by Steam" and "launched by hand"
 // -- the exact same chain works outside Steam, so one of these must be it.
 static std::string Narrow(const std::wstring& w)
@@ -257,6 +275,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
     Log("launcher start");
     DefineEnv();
     LogContext();
+    ClearSteamEnv();
 
     if (!fs::exists(g_dir / L"Sinmai.exe")) {
         MessageBoxW(nullptr, (L"Sinmai.exe was not found next to this launcher:\n\n" +
