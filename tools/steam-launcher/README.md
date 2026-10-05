@@ -82,7 +82,7 @@ zig 可以从 <https://ziglang.org/download/> 下个 linux x86_64 包解压即�
 （`start-steam.bat` 是这个 exe 早期版本用的启动脚本，现在 exe 不再需要它；
 想只用 bat 的人可以自己留着用。）
 
-仓库里附了一份编好的 `client/MaimaiSteam.exe`（**961536 字节 / md5 `8521ecc720bdba58879dc59468d96ee8`**）。
+仓库里附了一份编好的 `client/MaimaiSteam.exe`（**966144 字节 / md5 `371671448f64ddc5a99a318c55faaab3`**）。
 用上面任一方式重编后 md5 会变，这是正常的 —— 编译器会在产物里写时间戳，
 判断"是不是同一份"看行为（或看 `MaimaiSteam.exe` 旁的源码）而不是 md5。
 

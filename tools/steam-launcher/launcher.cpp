@@ -174,6 +174,49 @@ static bool DefineEnv()
     return SetEnvironmentVariableW(L"OPENSSL_ia32cap", L":~0x20000000") != 0;
 }
 
+// Dump the things that differ between "launched by Steam" and "launched by hand"
+// -- the exact same chain works outside Steam, so one of these must be it.
+static std::string Narrow(const std::wstring& w)
+{
+    std::string out;
+    for (wchar_t c : w) out.push_back(c < 128 ? (char)c : '?');
+    return out;
+}
+
+static void LogContext()
+{
+    HANDLE tok = nullptr;
+    if (OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &tok)) {
+        TOKEN_ELEVATION el{};
+        DWORD len = 0;
+        if (GetTokenInformation(tok, TokenElevation, &el, sizeof(el), &len))
+            Log(std::string("elevated = ") + (el.TokenIsElevated ? "YES" : "no"));
+        CloseHandle(tok);
+    }
+
+    const wchar_t* vars[] = { L"__COMPAT_LAYER", L"SteamAppId", L"SteamGameId",
+                              L"SteamOverlayGameId", L"SteamClientLaunch",
+                              L"OPENSSL_ia32cap", L"PATH" };
+    for (const wchar_t* v : vars) {
+        wchar_t buf[4096];
+        DWORD n = GetEnvironmentVariableW(v, buf, 4096);
+        if (n == 0) {
+            Log("env " + Narrow(v) + " = <unset>");
+        } else {
+            std::wstring val(buf, buf + (n < 4096 ? n : 4095));
+            std::string s = Narrow(val);
+            if (v[0] == L'P' && wcslen(v) == 4) {    // PATH: just log the length
+                Log("env PATH length = " + std::to_string(s.size()));
+            } else {
+                Log("env " + Narrow(v) + " = " + s);
+            }
+        }
+    }
+    Log("Y: drive type = " + std::to_string((int)GetDriveTypeW(L"Y:\\"))
+        + " (2=removable 3=fixed 4=remote 5=cdrom 6=ramdisk 1=no root)");
+    Log("cwd = " + Narrow(fs::current_path().wstring()));
+}
+
 static bool AmdaemonInjectionRound(int round, const std::wstring& injectArgs)
 {
     const int kAttempts = 3;
@@ -213,6 +256,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
 
     Log("launcher start");
     DefineEnv();
+    LogContext();
 
     if (!fs::exists(g_dir / L"Sinmai.exe")) {
         MessageBoxW(nullptr, (L"Sinmai.exe was not found next to this launcher:\n\n" +
