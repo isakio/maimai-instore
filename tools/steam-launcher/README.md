@@ -19,13 +19,21 @@
 
 ```
 Steam ──► MaimaiSteam.exe（本目录编译出来的，GUI 子系统，无控制台）
-            └─ 隐藏控制台跑 start-steam.bat
-                 ├─ start /min inject …（和原版 start.bat 一样的写法）
-                 ├─ 检查 amdaemon.exe 是否活着 → 没起来就重试（最多 5 次）
-                 └─ 确认 amdaemon 起来后才 sinmai.exe -monitor 2
-            └─ 等 Sinmai.exe 出现 → 陪到它退出 → 等 10 秒收尾
-            └─ 游戏若 25 秒内就死（注入失败的典型症状）→ 清干净重试整轮，最多 3 轮
+            │  自己把整套启动流程做完，全程不经过 cmd / 不创建任何窗口：
+            │  重复 3 轮：
+            │    重复 5 次：
+            │      inject.exe -d -k mai2hook.dll amdaemon.exe -f -c …
+            │      （输出抓进 inject-out.txt；卡住 20 秒就杀掉）
+            │      等 4 秒看 amdaemon.exe 是否活着 → 没起来就清干净再来
+            │    amdaemon 起来 → Sinmai.exe -monitor 2
+            │    15 秒后复查：游戏还在 + amdaemon 还在 → 判定成功，陪到游戏退出
+            │    否则（= 黑屏那种）杀干净、进入下一轮
+            └─ 游戏退出后 taskkill amdaemon.exe 收尾，然后自己退出
 ```
+
+> 早期版本是"launcher 跑 bat、bat 里 inject"，实测**从 Steam 启动时 inject 会连续失败**
+> （Steam 的 job 对象 + 控制台那一层），所以现在 inject 这一步由 exe 直接做，
+> 既避开了那层，也能把 inject 的真实输出抓下来（`inject-out.txt`）。
 
 ## 踩过的坑（改这个之前先看一眼）
 
@@ -60,20 +68,21 @@ zig 可以从 <https://ziglang.org/download/> 下个 linux x86_64 包解压即�
 
 ## 安装
 
-把两个文件放到**和 `Sinmai.exe` 同一层**（也就是 `Package\`）：
+把这个 exe 放到**和 `Sinmai.exe` 同一层**（也就是 `Package\`）：
 
 ```
 <游戏目录>\
 ├── Sinmai.exe
 ├── start.bat            ← 你原来的，不动它
-├── start-steam.bat      ← 本目录的
-├── MaimaiSteam.exe      ← 本目录编译出来的
+├── MaimaiSteam.exe      ← 本目录编译出来的（Steam 里加它）
 └── ...
 ```
 
-`client/install.ps1` 会顺手把这两个文件也拷过去。
+`client/install.ps1` 会顺手把它拷过去。
+（`start-steam.bat` 是这个 exe 早期版本用的启动脚本，现在 exe 不再需要它；
+想只用 bat 的人可以自己留着用。）
 
-仓库里附了一份编好的 `client/MaimaiSteam.exe`（**953344 字节 / md5 `b93dd672c2711a223c841b08cd3cac44`**）。
+仓库里附了一份编好的 `client/MaimaiSteam.exe`（**960512 字节 / md5 `10b3b0b57f564383632862fe4a68de7e`**）。
 用上面任一方式重编后 md5 会变，这是正常的 —— 编译器会在产物里写时间戳，
 判断"是不是同一份"看行为（或看 `MaimaiSteam.exe` 旁的源码）而不是 md5。
 

@@ -1,26 +1,27 @@
 // MaimaiSteam.exe -- Steam entry point / supervisor for maimai DX (SDEZ)
 //
-// Build: tools/steam-launcher/build.ps1 (MSVC) or build_wsl.sh (zig cross-compile)
-// Install: put this exe + start-steam.bat next to Sinmai.exe, then point a Steam
-//          non-Steam shortcut at the exe. See tools/steam-launcher/README.md.
+// Build: tools/steam-launcher/build.ps1 (MSVC) or build_wsl.sh (zig cross compile)
+// Install: put this exe next to Sinmai.exe, add it as a Steam non-Steam game.
+// Details / gotchas: tools/steam-launcher/README.md
 //
-// Why this exists: Steam's "add a non-Steam game" can only point at one exe and
-// the game has to be started through a .bat (it injects mai2hook.dll into
-// amdaemon.exe and sets OPENSSL_ia32cap). Pointing Steam straight at the .bat
-// leaves a console window on screen for the whole session.
+// Why this exists: Steam can only point at one exe, and the game must be started
+// with amdaemon.exe running *and* amdaemon must have mai2hook.dll injected, plus
+// the OPENSSL_ia32cap env var. That is what start.bat does -- but adding a .bat
+// to Steam leaves a console window on screen, and (measured) running "inject"
+// through cmd from inside Steam's job object fails / hangs.
 //
-// What this does:
-//   1. runs start-steam.bat with a HIDDEN console (the bat injects + verifies
-//      amdaemon and retries internally),
-//   2. waits until Sinmai.exe shows up,
-//   3. keeps waiting while the game runs, so Steam shows "playing" correctly,
-//   4. if the game dies within 25s (a failed injection shows up exactly like
-//      that: black screen / quick exit), it cleans up and retries the whole
-//      chain -- up to 3 rounds,
-//   5. waits ~10s after the game exits so start.bat can run its
-//      "taskkill amdaemon.exe" cleanup, then quits.
+// So this launcher does the whole chain itself, with no cmd.exe and no console:
+//   round (up to 3):
+//     attempt (up to 5):
+//        inject.exe -d -k mai2hook.dll amdaemon.exe -f -c configs...
+//          (output captured to inject-out.txt; killed if it hangs)
+//        wait ~3s, is amdaemon.exe alive?  no -> kill leftovers, retry
+//     amdaemon is up -> start Sinmai.exe -monitor 2
+//     game alive after 15s and amdaemon still there -> healthy: wait for exit
+//     game died early / amdaemon gone -> kill leftovers, next round
+//   after the game exits: taskkill amdaemon.exe (cleanup), then quit
 //
-// Logs go to maimaiDX.log next to this exe (ASCII only).
+// Log: maimaiDX.log (plus inject-out.txt for inject's own output).
 
 #ifndef UNICODE
 #define UNICODE
@@ -32,6 +33,7 @@
 #include <tlhelp32.h>
 #include <filesystem>
 #include <fstream>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -66,43 +68,115 @@ static DWORD FindProcessId(const std::wstring& name)
     return pid;
 }
 
-static void KillProcess(const std::wstring& name)
+// Start a program with no console window; optionally capture its output to a
+// file. Returns the process handle (caller closes it) or nullptr.
+// Note: inject.exe is EXPECTED to stay alive for the whole session, so this
+// must not wait for it.
+static HANDLE StartHidden(const std::wstring& cmdline, const fs::path* captureTo)
 {
-    std::wstring cmd = L"cmd.exe /c taskkill /f /im " + name + L" >nul 2>&1";
-    std::vector<wchar_t> buf(cmd.begin(), cmd.end());
-    buf.push_back(L'\0');
+    HANDLE hOut = INVALID_HANDLE_VALUE;
     STARTUPINFOW si{};
-    PROCESS_INFORMATION pi{};
     si.cb = sizeof(si);
-    if (CreateProcessW(nullptr, buf.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW,
-                       nullptr, g_dir.c_str(), &si, &pi)) {
-        WaitForSingleObject(pi.hProcess, 5000);
-        CloseHandle(pi.hThread);
-        CloseHandle(pi.hProcess);
+    si.dwFlags = STARTF_USESHOWWINDOW;
+    si.wShowWindow = SW_HIDE;
+
+    if (captureTo != nullptr) {
+        SECURITY_ATTRIBUTES sa{};
+        sa.nLength = sizeof(sa);
+        sa.bInheritHandle = TRUE;
+        hOut = CreateFileW(captureTo->c_str(), GENERIC_WRITE,
+                           FILE_SHARE_READ | FILE_SHARE_WRITE, &sa,
+                           CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (hOut != INVALID_HANDLE_VALUE) {
+            si.dwFlags |= STARTF_USESTDHANDLES;
+            si.hStdOutput = hOut;
+            si.hStdError = hOut;
+            si.hStdInput = INVALID_HANDLE_VALUE;
+        }
     }
+
+    std::vector<wchar_t> buf(cmdline.begin(), cmdline.end());
+    buf.push_back(L'\0');
+    PROCESS_INFORMATION pi{};
+    BOOL ok = CreateProcessW(nullptr, buf.data(), nullptr, nullptr, TRUE,
+                             CREATE_NO_WINDOW, nullptr, g_dir.c_str(), &si, &pi);
+    if (hOut != INVALID_HANDLE_VALUE) CloseHandle(hOut);
+    if (!ok) return nullptr;
+    CloseHandle(pi.hThread);
+    return pi.hProcess;
 }
 
-static bool StartHidden(const fs::path& bat, HANDLE& hProc)
+static void KillProcess(const std::wstring& name)
 {
-    std::wstring cmd = L"cmd.exe /d /c \"\"" + bat.wstring() + L"\"\"";
-    std::wstring cwd = g_dir.wstring();
+    std::wstring cmd = L"cmd.exe /c taskkill /f /im " + name;
+    HANDLE h = StartHidden(cmd, nullptr);
+    if (h) { WaitForSingleObject(h, 5000); CloseHandle(h); }
+}
+
+static bool WaitForAmdaemonUp(int seconds)
+{
+    for (int i = 0; i < seconds * 4; ++i) {
+        if (FindProcessId(L"amdaemon.exe") != 0) return true;
+        Sleep(250);
+    }
+    return false;
+}
+
+static bool StartGame(std::wstring& err)
+{
+    std::wstring cmd = L"Sinmai.exe -monitor 2";
     std::vector<wchar_t> buf(cmd.begin(), cmd.end());
     buf.push_back(L'\0');
     STARTUPINFOW si{};
     PROCESS_INFORMATION pi{};
     si.cb = sizeof(si);
-    if (!CreateProcessW(nullptr, buf.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW,
-                        nullptr, cwd.c_str(), &si, &pi)) {
+    si.dwFlags = STARTF_USESHOWWINDOW;
+    si.wShowWindow = SW_SHOWNORMAL;
+    if (!CreateProcessW(nullptr, buf.data(), nullptr, nullptr, FALSE, 0,
+                        nullptr, g_dir.c_str(), &si, &pi)) {
+        err = L"could not start Sinmai.exe (error " + std::to_wstring(GetLastError()) + L")";
         return false;
     }
     CloseHandle(pi.hThread);
-    hProc = pi.hProcess;
+    CloseHandle(pi.hProcess);
     return true;
 }
 
-static void ErrorBox(const std::wstring& text)
+static bool DefineEnv()
 {
-    MessageBoxW(nullptr, text.c_str(), L"maimaiDX launcher", MB_OK | MB_ICONERROR);
+    // the same thing start.bat does; children inherit it
+    return SetEnvironmentVariableW(L"OPENSSL_ia32cap", L":~0x20000000") != 0;
+}
+
+static bool AmdaemonInjectionRound(int round, const std::wstring& injectArgs)
+{
+    const int kAttempts = 3;
+    for (int attempt = 1; attempt <= kAttempts; ++attempt) {
+        KillProcess(L"amdaemon.exe");
+        KillProcess(L"inject.exe");
+        Sleep(300);
+
+        fs::path out = g_dir / L"inject-out.txt";
+        std::wstring cmd = L"inject.exe " + injectArgs;
+        HANDLE hInject = StartHidden(cmd, &out);
+        Log("round " + std::to_string(round) + " attempt " + std::to_string(attempt)
+            + ": inject started" + (hInject ? "" : " FAILED"));
+        if (!hInject) continue;
+
+        // inject.exe stays alive for the whole session (that is normal) -- what
+        // we care about is whether amdaemon came up.
+        if (WaitForAmdaemonUp(8)) {
+            if (hInject) CloseHandle(hInject);
+            Log("round " + std::to_string(round) + " attempt " + std::to_string(attempt)
+                + ": amdaemon.exe is up");
+            return true;
+        }
+        CloseHandle(hInject);
+        KillProcess(L"inject.exe");
+        Log("round " + std::to_string(round) + " attempt " + std::to_string(attempt)
+            + ": amdaemon did not come up (see inject-out.txt)");
+    }
+    return false;
 }
 
 int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
@@ -112,88 +186,90 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
     g_dir = fs::path(self).parent_path();
 
     Log("launcher start");
+    DefineEnv();
 
-    fs::path game = g_dir / L"Sinmai.exe";
-    fs::path bat  = g_dir / L"start-steam.bat";
-
-    if (!fs::exists(game)) {
-        ErrorBox(L"Sinmai.exe was not found next to this launcher:\n\n" + game.wstring());
+    if (!fs::exists(g_dir / L"Sinmai.exe")) {
+        MessageBoxW(nullptr, (L"Sinmai.exe was not found next to this launcher:\n\n" +
+                              (g_dir / L"Sinmai.exe").wstring()).c_str(),
+                    L"MaimaiSteam launcher", MB_OK | MB_ICONERROR);
         Log("ERROR: Sinmai.exe not found");
         return 1;
     }
+    if (!fs::exists(g_dir / L"inject.exe") || !fs::exists(g_dir / L"mai2hook.dll")) {
+        MessageBoxW(nullptr, L"inject.exe / mai2hook.dll not found next to this launcher.",
+                    L"MaimaiSteam launcher", MB_OK | MB_ICONERROR);
+        Log("ERROR: inject.exe or mai2hook.dll missing");
+        return 1;
+    }
 
-    const int kMaxRounds = 3;
-    const int kMinHealthySeconds = 25;   // shorter than this = treat as a failed launch
+    const std::wstring injectArgs =
+        L"-d -k mai2hook.dll amdaemon.exe -f -c config_common.json config_server.json config_client.json";
+    const int kRounds = 2;
 
-    for (int round = 1; round <= kMaxRounds; ++round) {
-        std::string r = std::to_string(round);
+    for (int round = 1; round <= kRounds; ++round) {
         DWORD pid = FindProcessId(L"Sinmai.exe");
-        HANDLE hBat = nullptr;
-
-        if (pid == 0) {
-            if (!fs::exists(bat)) {
-                ErrorBox(L"start-steam.bat was not found next to this launcher:\n\n" + bat.wstring());
-                Log("ERROR: start-steam.bat not found");
-                return 1;
-            }
-            KillProcess(L"amdaemon.exe");     // clean slate for this round
-            if (!StartHidden(bat, hBat)) {
-                ErrorBox(L"Could not start start-steam.bat (error " +
-                         std::to_wstring(GetLastError()) + L").");
-                Log("ERROR: CreateProcess failed");
-                return 1;
-            }
-            Log("round " + r + ": started start-steam.bat (hidden)");
-
-            for (int i = 0; i < 360 && pid == 0; ++i) {   // up to 90s
-                pid = FindProcessId(L"Sinmai.exe");
-                if (pid != 0) break;
-                if (hBat && WaitForSingleObject(hBat, 0) == WAIT_OBJECT_0) {
-                    Log("round " + r + ": the batch finished without starting the game (inject failed)");
-                    CloseHandle(hBat);
-                    hBat = nullptr;
-                    break;
-                }
-                Sleep(250);
-            }
+        if (pid != 0) {
+            Log("round " + std::to_string(round) + ": Sinmai.exe already running, just waiting");
         } else {
-            Log("round " + r + ": Sinmai.exe already running, just waiting for it");
+            if (!AmdaemonInjectionRound(round, injectArgs)) {
+                Log("round " + std::to_string(round) + ": injection failed 5 times");
+                continue;
+            }
+            std::wstring err;
+            if (!StartGame(err)) {
+                MessageBoxW(nullptr, err.c_str(), L"MaimaiSteam launcher", MB_OK | MB_ICONERROR);
+                Log("ERROR: " + std::string(err.begin(), err.end()));
+                KillProcess(L"amdaemon.exe");
+                return 1;
+            }
+            Log("round " + std::to_string(round) + ": started Sinmai.exe -monitor 2");
+            pid = 0;
+            for (int i = 0; i < 120 && pid == 0; ++i) {   // up to 30s
+                pid = FindProcessId(L"Sinmai.exe");
+                if (pid == 0) Sleep(250);
+            }
+            if (pid == 0) {
+                Log("round " + std::to_string(round) + ": Sinmai.exe never appeared");
+                KillProcess(L"amdaemon.exe");
+                continue;
+            }
         }
 
-        if (pid == 0) {
-            Log("round " + r + ": no game, moving on");
+        DWORD began = GetTickCount();
+        Sleep(15000);                       // give it time to get past startup
+        bool gameAlive = FindProcessId(L"Sinmai.exe") != 0;
+        bool amdAlive  = FindProcessId(L"amdaemon.exe") != 0;
+        Log(std::string("15s check: game=") + (gameAlive ? "up" : "gone")
+            + " amdaemon=" + (amdAlive ? "up" : "gone"));
+
+        if (!gameAlive || !amdAlive) {
+            Log("round " + std::to_string(round) + ": launch failed (this is the black-screen case), retrying");
+            KillProcess(L"Sinmai.exe");
+            KillProcess(L"amdaemon.exe");
+            KillProcess(L"inject.exe");
+            Sleep(2000);
             continue;
         }
 
-        Log("Sinmai.exe is up (pid " + std::to_string(pid) + "), waiting for it to exit");
-        DWORD began = GetTickCount();
-        HANDLE hGame = OpenProcess(SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
-        if (!hGame) {
-            Log("could not open the game process; waiting on the batch instead");
-            if (hBat) { WaitForSingleObject(hBat, INFINITE); CloseHandle(hBat); hBat = nullptr; }
-            Log("done");
-            return 3;
+        Log("launch looks healthy, waiting for the game to exit");
+        DWORD exitPid = FindProcessId(L"Sinmai.exe");
+        HANDLE hGame = OpenProcess(SYNCHRONIZE, FALSE, exitPid);
+        if (hGame) {
+            WaitForSingleObject(hGame, INFINITE);
+            CloseHandle(hGame);
         }
-        WaitForSingleObject(hGame, INFINITE);
-        CloseHandle(hGame);
-
-        DWORD lived = (GetTickCount() - began) / 1000;
-        Log("game exited after " + std::to_string(lived) + "s");
-
-        if (hBat) {
-            WaitForSingleObject(hBat, 10000);   // let the bat finish taskkill amdaemon
-            CloseHandle(hBat);
-            hBat = nullptr;
-        }
-
-        if (lived >= (DWORD)kMinHealthySeconds) {
-            Log("launch looks healthy, done");
-            return 0;
-        }
-        Log("that launch died too early, retrying the whole chain");
-        Sleep(2000);
+        Log("game exited after " + std::to_string((GetTickCount() - began) / 1000) + "s");
+        KillProcess(L"amdaemon.exe");
+        KillProcess(L"inject.exe");
+        Sleep(1500);
+        Log("done");
+        return 0;
     }
 
+    MessageBoxW(nullptr,
+                L"maimai could not be started (amdaemon.exe never came up).\n\n"
+                L"See maimaiDX.log and inject-out.txt next to this launcher.",
+                L"MaimaiSteam launcher", MB_OK | MB_ICONERROR);
     Log("gave up after all rounds");
     return 4;
 }
