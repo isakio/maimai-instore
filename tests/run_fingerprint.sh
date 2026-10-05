@@ -48,21 +48,19 @@ fi
 if [ ! -f "$ROOT/build/InStoreLink.dll" ]; then
     bash "$ROOT/tools/build_wsl.sh" "$GAME" || exit 1
 fi
-if [ ! -f "$ROOT/build/InStoreMatch.dll" ] || \
-   [ "$ROOT/tools/InStoreMatch.cs" -nt "$ROOT/build/InStoreMatch.dll" ]; then
-    IM_ARGS=(/target:library /nologo /optimize+ "/out:$(to_win "$ROOT/build")\\InStoreMatch.dll")
-    for ref in \
-        "MelonLoader\\net35\\MelonLoader.dll" \
-        "MelonLoader\\net35\\0Harmony.dll" \
-        "Sinmai_Data\\Managed\\Assembly-CSharp.dll" \
-        "Sinmai_Data\\Managed\\AMDaemon.NET.dll" \
-        "Sinmai_Data\\Managed\\UnityEngine.CoreModule.dll" \
-        "Sinmai_Data\\Managed\\UnityEngine.dll" ; do
-        IM_ARGS+=(/reference:"$(to_win "$GAME")\\$ref")
-    done
-    IM_ARGS+=("$(to_win "$ROOT/tools/InStoreMatch.cs")")
-    "$CSC" "${IM_ARGS[@]}" 2>&1 | iconv -f GBK -t UTF-8 2>/dev/null
-fi
+# 每次都重编：InStoreMatch 是单文件、零点几秒，省掉"build/ 里那份是不是过期了"的判断
+IM_ARGS=(/target:library /nologo /optimize+ "/out:$(to_win "$ROOT/build")\\InStoreMatch.dll")
+for ref in \
+    "MelonLoader\\net35\\MelonLoader.dll" \
+    "MelonLoader\\net35\\0Harmony.dll" \
+    "Sinmai_Data\\Managed\\Assembly-CSharp.dll" \
+    "Sinmai_Data\\Managed\\AMDaemon.NET.dll" \
+    "Sinmai_Data\\Managed\\UnityEngine.CoreModule.dll" \
+    "Sinmai_Data\\Managed\\UnityEngine.dll" ; do
+    IM_ARGS+=(/reference:"$(to_win "$GAME")\\$ref")
+done
+IM_ARGS+=("$(to_win "$ROOT/tools/InStoreMatch.cs")")
+"$CSC" "${IM_ARGS[@]}" 2>&1 | iconv -f GBK -t UTF-8 2>/dev/null
 
 # 3) 逐对比较
 RC=0

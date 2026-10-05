@@ -6,6 +6,10 @@
 // 而 Harmony 又把它包成一句没头没尾的 "IL Compile Error (unknown location)"。
 // 这个坑在我们这儿真踩过（把 nfSocket 写成了 socket），所以做成自动检查。
 //
+// 顺带查另外两类编译期看不出来、只在运行时炸的错误：
+//   · 补丁方法忘了带 [HarmonyPrefix] / [HarmonyPostfix]（Harmony 会直接拒绝这条补丁）
+//   · `___字段` 注入的字段在目标类型里根本不存在（注入失败 = 这条补丁等于没打）
+//
 //   csc /r:Mono.Cecil.dll /out:check_patch_params.exe check_patch_params.cs
 //   check_patch_params.exe <我们的dll> <游戏 Assembly-CSharp.dll>
 //
@@ -41,8 +45,27 @@ public static class CheckPatchParams
         resolver.AddSearchDirectory(Path.GetFullPath(Path.Combine(gameDir, "..", "..", "MelonLoader", "net6")));
         ReaderParameters rp = new ReaderParameters { AssemblyResolver = resolver };
 
-        AssemblyDefinition ours = AssemblyDefinition.ReadAssembly(argv[0], rp);
-        AssemblyDefinition game = AssemblyDefinition.ReadAssembly(argv[1], rp);
+        AssemblyDefinition ours, game;
+        try
+        {
+            ours = AssemblyDefinition.ReadAssembly(argv[0], rp);
+        }
+        catch (Exception ex)
+        {
+            // 路径写错 / 文件不是 .NET 程序集时，Cecil 抛的异常连 ToString() 都会炸，
+            // 所以这里只取 Message，并给一句人话
+            Console.WriteLine("读不了 " + argv[0] + "：" + SafeMessage(ex));
+            return 2;
+        }
+        try
+        {
+            game = AssemblyDefinition.ReadAssembly(argv[1], rp);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine("读不了 " + argv[1] + "：" + SafeMessage(ex));
+            return 2;
+        }
 
         Console.WriteLine("补丁程序集：" + ours.Name.Name);
         Console.WriteLine("游戏程序集：" + game.Name.Name);
@@ -81,6 +104,18 @@ public static class CheckPatchParams
     {
         _checked++;
         string patchName = patchType.Name + "." + patch.Name;
+
+        // (1) 必须正好是 Prefix 或 Postfix 之一，否则 Harmony 直接拒绝这条补丁
+        bool isPrefix = patch.CustomAttributes.Any(a => a.AttributeType.Name == "HarmonyPrefix");
+        bool isPostfix = patch.CustomAttributes.Any(a => a.AttributeType.Name == "HarmonyPostfix");
+        if (isPrefix == isPostfix)
+        {
+            // 两个都没有、或者两个都有（后者多半是复制粘贴留下的），都报出来
+            Report(false, patchName, isPrefix
+                ? "同时带了 [HarmonyPrefix] 和 [HarmonyPostfix]，Harmony 只认一个"
+                : "既没有 [HarmonyPrefix] 也没有 [HarmonyPostfix]，Harmony 会拒绝这条补丁");
+            return;
+        }
 
         // [HarmonyPatch(typeof(X), "方法名")] / (typeof(X), MethodType.Ctor) / (typeof(X), "属性名", MethodType.Getter)
         List<CustomAttributeArgument> args = attr.ConstructorArguments.ToList();
@@ -140,6 +175,22 @@ public static class CheckPatchParams
             return;
         }
 
+        // (2) `___字段` 注入的字段必须真的存在（Harmony 的字段注入前缀是三个下划线）
+        List<string> badFields = new List<string>();
+        foreach (ParameterDefinition p in patch.Parameters)
+        {
+            if (p.Name == null || !p.Name.StartsWith("___", StringComparison.Ordinal)) continue;
+            string fieldName = p.Name.Substring(3);
+            if (FindField(gameType, fieldName) == null) badFields.Add(fieldName);
+        }
+        if (badFields.Count > 0)
+        {
+            Report(false, patchName,
+                "→ " + gameType.Name + "：目标类型（含父类）里没有这些字段："
+                + string.Join("，", badFields.ToArray()));
+            return;
+        }
+
         // 逐个比对参数名：只比"普通参数"（跳过 __instance/__result/___字段 这些特殊名字）
         List<string> mismatches = new List<string>();
         foreach (ParameterDefinition p in patch.Parameters)
@@ -189,6 +240,20 @@ public static class CheckPatchParams
     }
 
     private enum MethodType { Normal = 0, Getter = 1, Setter = 2, Constructor = 3, StaticConstructor = 4 }
+
+    /// <summary>在类型和它的父类链上找字段（Harmony 的 ___字段 是按实例类型解析的）。</summary>
+    private static FieldDefinition FindField(TypeDefinition type, string name)
+    {
+        TypeDefinition t = type;
+        for (int depth = 0; t != null && depth < 32; depth++)
+        {
+            FieldDefinition f = t.Fields.FirstOrDefault(x => x.Name == name);
+            if (f != null) return f;
+            try { t = t.BaseType == null ? null : t.BaseType.Resolve(); }
+            catch (Exception) { return null; }
+        }
+        return null;
+    }
 
     private static MethodDefinition ResolveTarget(TypeDefinition type, string name, MethodType kind,
         TypeReference[] argumentTypes)

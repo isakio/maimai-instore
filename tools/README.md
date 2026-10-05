@@ -174,7 +174,7 @@ bash tests/run_param_check.sh  # 只查补丁参数名（秒级，改完补丁�
 
 | 工具 | 用途 |
 | --- | --- |
-| `check_patch_params.cs` | 补丁参数名 / 目标方法逐个对照（`tests/run_param_check.sh` 用它） |
+| `check_patch_params.cs` | 补丁参数名 / 目标方法 / Prefix-Postfix 标注 / `___字段` 是否存在，逐个对照（`tests/run_param_check.sh` 用它） |
 | `fingerprint.cs` | 程序集指纹：判断 `client/` 里那份 dll 是不是真的由当前源码编的（`tests/run_fingerprint.sh` 用它） |
 | `find_type.py` | 在 `Assembly-CSharp.dll` 里按名字查类型落哪个命名空间 |
 | `dump_sigs.cs` | 用 Mono.Cecil 打印某个 dll 里方法的真实签名（对比上游发布版用） |

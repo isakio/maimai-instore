@@ -5,6 +5,10 @@
 # ___字段 这些特殊名字除外）。名字写错编译期完全没提示，跑起来才抛
 # "IL Compile Error (unknown location)"，真踩过一次（nfSocket 写成了 socket）。
 #
+# 顺带查另外两类编译期同样看不出来的错：
+#   · 补丁忘了带 [HarmonyPrefix] / [HarmonyPostfix]（Harmony 直接拒绝这条补丁）
+#   · `___字段` 注入的字段在目标类型（含父类）里不存在（注入失败 = 这条补丁等于没打）
+#
 #   bash tests/run_param_check.sh [游戏目录]
 
 set -uo pipefail
