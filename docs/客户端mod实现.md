@@ -317,6 +317,7 @@ v0.2 补上这几条（服务端 `instorematchd`，客户端配合）：
 | 17 | **招募期间每 10 秒往大厅续报一次"我的房间"** | 大厅的房间是 30 秒 TTL，而本体只在开始招募那一下发一次 `StartRecruit`（实测 5 分钟里总共 6 次，不是周期广播）。不续报的话，开好房干等 30 秒，大厅里那条房间就悄悄没了 —— 后来的人再也看不到。续报在主线程做，房间数据从 `PartyManager.GetRecruitList()`（含自己）里按伪 IP 找 |
 | 18 | 被我们拒掉的房间（歌没装）记一笔，不再无限重喂 | 拒掉之后游戏永远不会"有这个房间"，对账每 2 秒又会喂一次 —— 无限重试 + 无限刷日志（`_deliveredAt` 那本账也因此越积越多）。现在房间从大厅消失时会把两本账一起清掉 |
 | 19 | `StartRecruitPolling` 幂等 | 它挂在 `Client` 构造函数上，而 `Interval()` 每次无条件起一条线程：本体如果每进一次选曲就重建 party 客户端，就是每进一次多一条 10 秒轮询线程 |
+| 20 | 找 `SocketAsyncEventArgs.Completed` 事件背后字段时**兼容多个运行时** | 上游写死 `GetField("Completed")`。这个字段名跟运行时有关：游戏里的 Unity Mono 叫 `Completed`，桌面 .NET Framework 叫 `m_Completed`。名字对不上时 `GetField` 返回 null，**连接完成回调就静默不触发**（游戏永远等下去），日志里一个字都没有 —— 这正是 `tests/ClientTests.cs` 加进来之后第一轮就抓到的 |
 
 > 和 `InStoreMatch.dll` 的关系：那个负责**让分类栏出现「店内マッチング」这一格**（本体快照问题），
 > 这个负责**把那一格接到公网**。两个都要装，而且装了 `InStoreLink.dll` 就**必须删掉
@@ -372,13 +373,14 @@ bash tools/build_wsl.sh /mnt/e/game/xxx/Package   # 游戏装别处时
 ## 九、测试
 
 ```bash
-bash tests/run_all.sh        # 九步全跑，一分钟左右
+bash tests/run_all.sh        # 十步全跑，一分钟左右
 ```
 
 | 测试 | 覆盖什么 | 现在的结果 |
 | --- | --- | --- |
 | 编译 | 源码 ↔ 游戏本体 API 是否对得上 | ✅ 通过（`build/InStoreLink.dll`） |
 | `tests/ProtocolTests.cs` | 序列化/解析往返、伪 IP、配置解析（36 项） | ✅ 全绿 |
+| `tests/ClientTests.cs` | **客户端逻辑**（脱离游戏跑）：建流挂起 / 接流成功、超时、CLOSE 取消、待 Accept 队列清理（16 项） | ✅ 全绿 |
 | `tests/py/test_vectors.py` | 同一批向量 + **用真实抓包日志反验**（17 项；给出 `MAIMAI_LOGS` 时 18 项） | ✅ 全绿（12 种真实报文全部能还原） |
 | `tests/py/test_e2e.py` | 起真的 instorematchd，跑完 开房→列表→建流→传数据→关流→关房（18 项） | ✅ 全绿 |
 | `tests/py/test_edge.py` | **异常流程**：房主先开打 / 目标不在线 / 反复重试 / 挂起超时回收 / 身份校验 / 限速与房间上限（14 项） | ✅ 全绿 |
@@ -386,7 +388,7 @@ bash tests/run_all.sh        # 九步全跑，一分钟左右
 | `tools/check_patch_params.cs` | **参数名检查**：两个 dll 的补丁（InStoreLink 33 条 + InStoreMatch 8 个补丁方法）的普通参数名逐个和游戏对齐，外加 Prefix/Postfix 标注、`___字段` 是否存在（Harmony 是按名字传参的） | ✅ 全绿 |
 | `tools/fingerprint.cs` | **发行版指纹**：`client/` 里那两个 dll 是不是真的由当前源码编出来的（csc 输出不可复现，md5 比不出来） | ✅ 全绿 |
 | `tests/py/test_docs.py` | **文档一致性**：发行 dll 的字节数 / md5、Markdown 相对链接、补丁条数、旧名字残留、`third_party/` 里有没有二进制 | ✅ 全绿 |
-| `tests/run_release_check.sh` | **Release 附件一致性**（要 gh + 联网，所以不在上面那九步里）：GitHub 上最新 Release 挂的两个 dll 和 `client/` 里的实物是否一致 —— 拿 API 的 digest 比，不靠下载（下载链接有 CDN 缓存） | ✅ 全绿 |
+| `tests/run_release_check.sh` | **Release 附件一致性**（要 gh + 联网，所以不在上面那十步里）：GitHub 上最新 Release 挂的两个 dll 和 `client/` 里的实物是否一致 —— 拿 API 的 digest 比，不靠下载（下载链接有 CDN 缓存） | ✅ 全绿 |
 
 探针也可以单独跑（游戏更新之后必跑）：
 

@@ -116,7 +116,7 @@
 
 | 文件 | 干什么 | 校验 |
 | --- | --- | --- |
-| [`client/InStoreLink.dll`](client/InStoreLink.dll) | 联机本体：注册中继、开房、把对方的房间喂回游戏 | v0.2，52736 字节 / md5 `c048fc095d87873ab01023a85e4a9423` |
+| [`client/InStoreLink.dll`](client/InStoreLink.dll) | 联机本体：注册中继、开房、把对方的房间喂回游戏 | v0.2，53248 字节 / md5 `2572b4c1afde305e023f064d76c00311` |
 | [`client/InStoreMatch.dll`](client/InStoreMatch.dll) | 让选曲界面画出「店内マッチング」那一格 | v2.5，18432 字节 / md5 `1a94a9b6be9b03bfb274e41b0a8256b3` |
 
 两个文件都在本仓库的 [`client/`](client/) 里（[最新 Release](https://github.com/isakio/maimai-instore/releases/latest) 也附了），不用再去别的地方下。
@@ -248,7 +248,7 @@ sudo IMD_ADMIN_TOKEN='你的token' bash instorematchd/install.sh <你的域名�
 
 ## 更新记录
 
-**v0.2（`InStoreLink.dll`，52736 字节 / md5 `c048fc095d87873ab01023a85e4a9423`）**
+**v0.2（`InStoreLink.dll`，53248 字节 / md5 `2572b4c1afde305e023f064d76c00311`）**
 
 这一版专门修**"没按正常剧本走"的那些情况** —— 正常流程本来就能跑通，但这些岔路以前全是
 "只写一行日志就完事"，玩家侧表现为一直转圈或者莫名其妙掉线：

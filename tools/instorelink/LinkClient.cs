@@ -46,8 +46,12 @@ namespace InStoreLink
         private const int SendTickMs = 10;         // 发送线程的节拍
         private const int HeartbeatMs = 1000;      // 心跳间隔
         private const int DelayWindowSize = 20;    // 延迟滑动窗口
-        /// <summary>建流之后等对方接流的时限；超了就当作这次连接失败（见 AddAcceptPending）。</summary>
-        public const int AcceptTimeoutMs = 8000;
+        /// <summary>
+        /// 建流之后等对方接流的时限；超了就当作这次连接失败（见 AddAcceptPending）。
+        /// 默认 8 秒；写成可写字段是为了让 tests/ClientTests.cs 能把它调短，
+        /// 不用为了验一条超时真等 8 秒。
+        /// </summary>
+        public static int AcceptTimeoutMs = 8000;
 
         public static LinkClient Instance;
 

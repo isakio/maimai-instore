@@ -91,8 +91,39 @@ namespace InStoreLink
             return qq != null && !qq.IsEmpty;
         }
 
-        private static readonly FieldInfo CompletedField = typeof(SocketAsyncEventArgs)
-            .GetField("Completed", BindingFlags.Instance | BindingFlags.NonPublic);
+        private static readonly FieldInfo CompletedField = FindCompletedField();
+
+        /// <summary>
+        /// 找 `SocketAsyncEventArgs.Completed` 事件背后那个委托字段。
+        ///
+        /// 为什么不能直接写死 "Completed"（上游就是这么写的）：这个字段名跟运行时有关 ——
+        ///   游戏里的 Unity Mono → `Completed`
+        ///   桌面 .NET Framework → `m_Completed`
+        /// 名字对不上时 GetField 返回 null，Completed 回调就**静默不触发**，
+        /// 表现是"连上了但游戏一直等"或"永远卡在连接中"，而且日志里一个字都没有。
+        /// </summary>
+        private static FieldInfo FindCompletedField()
+        {
+            Type t = typeof(SocketAsyncEventArgs);
+            const BindingFlags Flags = BindingFlags.Instance | BindingFlags.NonPublic;
+            string[] known = { "Completed", "m_Completed", "_completed" };
+            for (int i = 0; i < known.Length; i++)
+            {
+                FieldInfo f = t.GetField(known[i], Flags);
+                if (f != null) return f;
+            }
+            // 都不认识就按类型扫一遍：字段类型是 EventHandler<SocketAsyncEventArgs>
+            FieldInfo[] all = t.GetFields(Flags);
+            for (int i = 0; i < all.Length; i++)
+            {
+                string ft = all[i].FieldType.FullName;
+                if (ft != null && ft.StartsWith("System.EventHandler`1", StringComparison.Ordinal)
+                    && ft.Contains("SocketAsyncEventArgs")) return all[i];
+            }
+            LinkLog.Error("找不到 SocketAsyncEventArgs.Completed 背后那个字段 —— "
+                          + "连接完成的回调发不出去（游戏会一直等），请把这个运行时反馈上来");
+            return null;
+        }
 
         /// <summary>
         /// 游戏要主动连对方（房客侧）。目标地址来自房主发的招募数据，
