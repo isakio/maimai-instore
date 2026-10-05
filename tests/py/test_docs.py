@@ -58,7 +58,7 @@ def main():
     # ---------------------------------------------------------- 1. 发行 dll
     print("1) 发行 dll 的字节数 / md5")
     dlls = {}
-    for name in ("InStoreLink.dll", "InStoreMatch.dll"):
+    for name in ("InStoreLink.dll", "InStoreMatch.dll", "MaimaiSteam.exe"):
         path = os.path.join(ROOT, "client", name)
         if not os.path.isfile(path):
             check(False, "client/%s 存在" % name)

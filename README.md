@@ -75,6 +75,7 @@
 ├── client/                        ← 装客户端要的东西全在这儿
 │   ├── InStoreLink.dll            ← 联机 mod（v0.1，替代上游 WorldLink.dll）
 │   ├── InStoreMatch.dll           ← 让「店内マッチング」那一格画出来（v2.5）
+│   ├── MaimaiSteam.exe            ← 可选：把 maimai 加进 Steam 用的启动器（见 tools/steam-launcher/）
 │   └── install.ps1                ← 一条命令：拷两个 dll + 停用旧的 + 写 InStoreLink.toml
 ├── tools/
 │   ├── instorelink/*.cs           ← InStoreLink 源码（C# 5，11 个文件，零第三方依赖）
@@ -82,6 +83,7 @@
 │   ├── build_wsl.sh               ← 在 WSL 里编译（借用 Windows 的 csc.exe）
 │   ├── InStoreMatch.cs            ← InStoreMatch 源码（单文件）
 │   ├── build_instorematch.ps1     ← 编译 InStoreMatch
+│   ├── steam-launcher/            ← 把 maimai 放进 Steam 的启动器（源码 + 编译脚本 + 说明）
 │   ├── check_patch_params.cs      ← 检查补丁参数名（Harmony 是按名字传参的）
 │   ├── il.py / find_type.py / dump_sigs.cs / fingerprint.cs  ← 读游戏程序集的小工具
 │   ├── fake_player.py             ← 假玩家：不用真人就能测招募/进房
@@ -177,6 +179,18 @@ powershell -ExecutionPolicy Bypass -File .\client\install.ps1
 ```
 
 （`Debug=true` 时还会打心跳和每个包；排查问题的时候再开。）
+
+**想让它也出现在 Steam 里？**（能记录时长、有 overlay）
+
+直接把 `start.bat` 加进 Steam 会全程挂一个命令行黑框，所以仓库里附了个无窗口的小启动器：
+
+- [`client/MaimaiSteam.exe`](client/MaimaiSteam.exe) ← 把它和
+  [`tools/steam-launcher/start-steam.bat`](tools/steam-launcher/start-steam.bat) 放到
+  `Sinmai.exe` 同一层，然后在 Steam 里「添加非 Steam 游戏」选这个 exe
+  （起始位置填那个文件夹）
+- 它内部还是跑 `start.bat` 那一套（inject amdaemon + 环境变量），只是隐藏了窗口、并且会
+  **校验 amdaemon 真的起来了、失败自动重试**（注入偶发失败时正是黑屏的成因）
+- 细节、编译方式、日志位置见 [`tools/steam-launcher/README.md`](tools/steam-launcher/README.md)
 
 ### 方式 B：自己搭服务器（不想连我那台，或者想开给一群人）
 
