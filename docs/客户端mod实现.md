@@ -283,6 +283,8 @@ RecruitInfo
 | 10 | `ApplyConnectData` 里把房间翻译进联机歌曲列表时**整条兜一层异常** | `GetNotesList()[musicId]` 是按曲目 ID 索引的，歌不在这台机器的谱面表里时可能返回 null、也可能直接抛越界/KeyNotFound；这是在 Unity 主线程上，抛出去就是整局崩（上游正是在这里崩的）。兜住之后只跳过这一条房间 |
 | 11 | 新增 `LinkRuntime.ConnectList`：**记住真正显示出来的房间顺序**，`RecruitData` getter 按光标取时用它 | 大厅里装不了的歌会被跳过，此时"光标第 n 格"和"原始房间列表第 n 项"不是同一个房间 —— 会变成显示 A 的歌、进去却是 B 的房间 |
 | 12 | 本体 `SocketBase.error` 的噪音降级成 `Warn`，并写明"与本插件无关" | 它本来就是游戏网络层自己抱怨（`send failed null (0)`），以前打成 `Error`，日志里一片红，容易误判成 mod 坏了 |
+| 13 | 轮询用的 `LinkLobby.Get` 统一走带 8 秒超时的那条实现 | `WebClient` 本身没有超时：大厅卡住不回时，在线人数/招募列表这两个轮询线程会一直陪着等，列表再也不刷新 |
+| 14 | 影子 socket 映射表换成 `ConcurrentDictionary` | 写它的是游戏线程（`NFSocket` 构造），读它的还包括"中继收到建流确认 → 回调"这条可能跑在接收线程上的路径；普通 `Dictionary` 在这种交叉访问下没有保证 |
 
 > 和 `InStoreMatch.dll` 的关系：那个负责**让分类栏出现「店内マッチング」这一格**（本体快照问题），
 > 这个负责**把那一格接到公网**。两个都要装，而且装了 `InStoreLink.dll` 就**必须删掉

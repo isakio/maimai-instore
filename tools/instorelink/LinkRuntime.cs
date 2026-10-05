@@ -26,9 +26,14 @@ namespace InStoreLink
         public static LinkClient Client;
         public static bool Stopping;
 
-        /// <summary>游戏本体的 NFSocket → 我们的影子 socket。</summary>
-        public static readonly Dictionary<NFSocket, LinkSocket> Redirect =
-            new Dictionary<NFSocket, LinkSocket>();
+        /// <summary>
+        /// 游戏本体的 NFSocket → 我们的影子 socket。
+        /// 用 ConcurrentDictionary：写它的是游戏线程（NFSocket 构造），而读它的除了游戏线程，
+        /// 还有"中继收到建流确认 → 回调"这条路径（可能在接收线程上）——
+        /// 普通 Dictionary 在这种交叉访问下没有保证。
+        /// </summary>
+        public static readonly ConcurrentDictionary<NFSocket, LinkSocket> Redirect =
+            new ConcurrentDictionary<NFSocket, LinkSocket>();
 
         /// <summary>Packet.write_uint(PacketType, int, uint)：禁用加解密时用来回写长度。</summary>
         public static MethodInfo PacketWriteUInt;

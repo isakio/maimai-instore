@@ -28,21 +28,14 @@ namespace InStoreLink
             return b + path;
         }
 
+        /// <summary>
+        /// 同步 GET（轮询线程用：在线人数、招募列表）。实现统一走下面那个带超时的版本 ——
+        /// WebClient 自己没有超时，大厅要是卡住不回，轮询线程会一直陪着等到 TCP 自己放弃
+        /// （招募列表就再也不刷新了）。
+        /// </summary>
         public static string Get(string url)
         {
-            if (string.IsNullOrEmpty(url)) return null;
-            try
-            {
-                using (WebClient web = NewWebClient())
-                {
-                    return web.DownloadString(new Uri(url));
-                }
-            }
-            catch (Exception ex)
-            {
-                LinkLog.Debug("GET " + url + " 失败：" + ex.Message);
-                return null;
-            }
+            return GetWithTimeout(url, TimeoutMs);
         }
 
         /// <summary>
