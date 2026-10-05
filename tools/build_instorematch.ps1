@@ -1,4 +1,4 @@
-# Build InStoreMatch.dll with the csc.exe that ships with Windows.
+﻿# Build InStoreMatch.dll with the csc.exe that ships with Windows.
 #
 #   powershell -ExecutionPolicy Bypass -File build_instorematch.ps1 `
 #       -Game "<game root, the folder that contains Sinmai.exe>"

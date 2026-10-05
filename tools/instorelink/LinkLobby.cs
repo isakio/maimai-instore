@@ -74,24 +74,6 @@ namespace InStoreLink
             }
         }
 
-        public static string Post(string url, string body)
-        {
-            if (string.IsNullOrEmpty(url)) return null;
-            try
-            {
-                using (WebClient web = NewWebClient())
-                {
-                    web.Headers["Content-Type"] = "application/json";
-                    return web.UploadString(new Uri(url), body ?? "");
-                }
-            }
-            catch (Exception ex)
-            {
-                LinkLog.Debug("POST " + url + " 失败：" + ex.Message);
-                return null;
-            }
-        }
-
         /// <summary>异步 POST（开房/关房用，别占着游戏线程）。</summary>
         public static void PostAsync(string url, string body, Action<string, Exception> callback)
         {

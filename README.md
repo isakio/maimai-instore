@@ -116,7 +116,7 @@
 
 | 文件 | 干什么 | 校验 |
 | --- | --- | --- |
-| [`client/InStoreLink.dll`](client/InStoreLink.dll) | 联机本体：注册中继、开房、把对方的房间喂回游戏 | v0.1，47616 字节 / md5 `62319f50b7051944315e472f1b84aa55` |
+| [`client/InStoreLink.dll`](client/InStoreLink.dll) | 联机本体：注册中继、开房、把对方的房间喂回游戏 | v0.1，48128 字节 / md5 `f37f6d2096af31aac800342aa0cdbd48` |
 | [`client/InStoreMatch.dll`](client/InStoreMatch.dll) | 让选曲界面画出「店内マッチング」那一格 | v2.5，18432 字节 / md5 `1a94a9b6be9b03bfb274e41b0a8256b3` |
 
 两个文件都在本仓库的 [`client/`](client/) 里（[最新 Release](https://github.com/isakio/maimai-instore/releases/latest) 也附了），不用再去别的地方下。
@@ -156,9 +156,10 @@ powershell -ExecutionPolicy Bypass -File .\client\install.ps1
 脚本会自己找游戏目录；找不到会提示你把文件夹拖进窗口，也可以直接指定：
 `-GameDir "<游戏根目录，就是 Sinmai.exe 那一层>"`。
 
-它会顺手把大厅地址写进 `<游戏根目录>\InStoreLink.toml`，默认就是我们的公共大厅
-`http://isakio.cn:20100` —— **不自己搭服务器的话，这个参数根本不用管**。
-只有你自己搭了大厅（见「方式 B」）时，才在命令最后多给一个参数改掉它。
+它会顺手写一份 `<游戏根目录>\InStoreLink.toml`（**已经存在的话不动它**，免得覆盖你自己填的
+地址），默认就是我们的公共大厅 `http://isakio.cn:20100` ——
+**不自己搭服务器的话，这个参数根本不用管**。
+只有你自己搭了大厅（见「方式 B」）时，才在命令最后多给一个 `-LobbyUrl` 参数改掉它。
 
 不想 clone 的话：从 [Release](https://github.com/isakio/maimai-instore/releases/latest)
 把两个 dll 下下来手动拷进 `Mods\`，再自己写那个 `InStoreLink.toml` 也一样。

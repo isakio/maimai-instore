@@ -259,8 +259,12 @@ namespace InStoreLink
         // 名字对不上就是 "Parameter "xxx" not found in method ..."。踩过一次。
         public static void PostNFSocketCtorFromSocket(NFSocket __instance, Socket nfSocket)
         {
-            LinkLog.Error("出现了没见过的 NFSocket(Socket) 构造 —— 游戏版本可能变了");
-            throw new NotImplementedException("NFSocket(Socket)");
+            // 上游这里直接抛异常（他们认为不该走到这儿）。我们改成兜底：
+            // 照着这个真 socket 的属性建一个影子 socket，免得哪天真出现就把游戏搞崩。
+            LinkLog.Warn("遇到 NFSocket(Socket) 构造 —— 按它的属性建影子 socket 兜底");
+            if (nfSocket == null) return;
+            LinkRuntime.Redirect[__instance] = new LinkSocket(
+                nfSocket.AddressFamily, nfSocket.SocketType, nfSocket.ProtocolType, 0);
         }
 
         private static LinkSocket Shadow(NFSocket socket)
@@ -270,11 +274,23 @@ namespace InStoreLink
             return shadow;
         }
 
+        /// <summary>
+        /// 没有影子 socket 时的兜底：打一行警告，然后**让本体自己跑**（等价于原生行为）。
+        /// 上游在这里直接用影子对象，影子不在就会 NRE 把游戏打死；我们宁可退化成原生。
+        /// </summary>
+        private static bool NoShadow(NFSocket socket, string what)
+        {
+            LinkLog.Warn("这个 socket 没有影子对象（" + what + "）—— 交给本体原生处理");
+            return true;
+        }
+
         [HarmonyPrefix]
         [HarmonyPatch(typeof(NFSocket), "Poll")]
         public static bool PreNFPoll(NFSocket socket, SelectMode mode, ref bool __result)
         {
-            __result = LinkSocket.Poll(Shadow(socket), mode);
+            LinkSocket shadow = Shadow(socket);
+            if (shadow == null) return NoShadow(socket, "Poll");
+            __result = LinkSocket.Poll(shadow, mode);
             return false;
         }
 
@@ -283,7 +299,9 @@ namespace InStoreLink
         public static bool PreNFSend(NFSocket __instance, byte[] buffer, int offset, int size,
             SocketFlags socketFlags, ref int __result)
         {
-            __result = Shadow(__instance).Send(buffer, offset, size, socketFlags);
+            LinkSocket shadow = Shadow(__instance);
+            if (shadow == null) return NoShadow(__instance, "Send");
+            __result = shadow.Send(buffer, offset, size, socketFlags);
             return false;
         }
 
@@ -292,7 +310,9 @@ namespace InStoreLink
         public static bool PreNFSendTo(NFSocket __instance, byte[] buffer, int offset, int size,
             SocketFlags socketFlags, EndPoint remoteEP, ref int __result)
         {
-            __result = Shadow(__instance).SendTo(buffer, offset, size, socketFlags, remoteEP);
+            LinkSocket shadow = Shadow(__instance);
+            if (shadow == null) return NoShadow(__instance, "SendTo");
+            __result = shadow.SendTo(buffer, offset, size, socketFlags, remoteEP);
             return false;
         }
 
@@ -301,7 +321,10 @@ namespace InStoreLink
         public static bool PreNFReceive(NFSocket __instance, byte[] buffer, int offset, int size,
             SocketFlags socketFlags, out SocketError errorCode, ref int __result)
         {
-            __result = Shadow(__instance).Receive(buffer, offset, size, socketFlags, out errorCode);
+            errorCode = SocketError.Success;       // out 参数必须先赋值（下面兜底分支会直接 return）
+            LinkSocket shadow = Shadow(__instance);
+            if (shadow == null) return NoShadow(__instance, "Receive");
+            __result = shadow.Receive(buffer, offset, size, socketFlags, out errorCode);
             return false;
         }
 
@@ -310,7 +333,9 @@ namespace InStoreLink
         public static bool PreNFReceiveFrom(NFSocket __instance, byte[] buffer, SocketFlags socketFlags,
             ref EndPoint remoteEP, ref int __result)
         {
-            __result = Shadow(__instance).ReceiveFrom(buffer, socketFlags, ref remoteEP);
+            LinkSocket shadow = Shadow(__instance);
+            if (shadow == null) return NoShadow(__instance, "ReceiveFrom");
+            __result = shadow.ReceiveFrom(buffer, socketFlags, ref remoteEP);
             return false;
         }
 
@@ -336,7 +361,15 @@ namespace InStoreLink
         [HarmonyPatch(typeof(NFSocket), "Accept")]
         public static bool PreNFAccept(NFSocket __instance, ref NFSocket __result)
         {
-            LinkSocket accepted = Shadow(__instance).Accept();
+            LinkSocket listener = Shadow(__instance);
+            if (listener == null) return NoShadow(__instance, "Accept");
+            LinkSocket accepted = listener.Accept();
+            if (accepted == null)
+            {
+                // 没有待处理的建流请求（正常情况不该走到：游戏是先 Poll 再 Accept 的）
+                LinkLog.Warn("Accept 时没有待处理的建流请求");
+                return true;                        // 交给本体原生处理，别造一个空壳出来
+            }
             NFSocket mock = new NFSocket(AddressFamily.InterNetwork, SocketType.Dgram,
                 ProtocolType.Udp, MockSocketId);
             LinkRuntime.Redirect[mock] = accepted;

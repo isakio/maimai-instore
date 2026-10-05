@@ -98,14 +98,35 @@ foreach ($name in @("InStoreLink.dll", "InStoreMatch.dll")) {
     Write-Host "[OK] $name -> $dst" -ForegroundColor Green
 }
 
-$toml = @"
+# 配置文件：**默认不覆盖已有的**（免得把用户自己填的大厅地址冲掉）。
+# 只有显式给了 -LobbyUrl，或者文件还不存在时才会写。
+$tomlPath = Join-Path $GameDir "InStoreLink.toml"
+$explicitLobby = $PSBoundParameters.ContainsKey("LobbyUrl")
+$legacyToml = Join-Path $GameDir "WorldLink.toml"
+
+# 从老的 WorldLink.toml 里把大厅地址搬过来（用户以前改过的话别丢）
+if ((-not (Test-Path $tomlPath)) -and (-not $explicitLobby) -and (Test-Path $legacyToml)) {
+    $m = Select-String -Path $legacyToml -Pattern '^\s*LobbyUrl\s*=\s*"([^"]+)"' -ErrorAction SilentlyContinue |
+         Select-Object -First 1
+    if ($m) {
+        $LobbyUrl = $m.Matches[0].Groups[1].Value
+        Write-Host "[..] 从 WorldLink.toml 沿用了大厅地址：$LobbyUrl" -ForegroundColor Yellow
+    }
+}
+
+if ((Test-Path $tomlPath) -and -not $explicitLobby) {
+    Write-Host "[--] 已有 InStoreLink.toml，保持原样（要改大厅地址就加 -LobbyUrl 参数，或直接编辑它）" -ForegroundColor DarkGray
+} else {
+    $toml = @"
 # 由 install.ps1 生成
 LobbyUrl="$LobbyUrl"
 Debug=false
 "@
-Set-Content -Path (Join-Path $GameDir "InStoreLink.toml") -Value $toml -Encoding ASCII
-Write-Host "[OK] InStoreLink.toml -> $GameDir\InStoreLink.toml  (LobbyUrl=$LobbyUrl)" -ForegroundColor Green
-Write-Host "     （如果你以前用的是 WorldLink.toml，那个文件可以留着，新文件优先）" -ForegroundColor DarkGray
+    # 注意用 UTF8：ASCII 会把中文注释写成 ?
+    Set-Content -Path $tomlPath -Value $toml -Encoding UTF8
+    Write-Host "[OK] InStoreLink.toml -> $tomlPath  (LobbyUrl=$LobbyUrl)" -ForegroundColor Green
+    Write-Host "     （如果你以前用的是 WorldLink.toml，那个文件可以留着，新文件优先）" -ForegroundColor DarkGray
+}
 
 Write-Host ""
 Write-Host "mod 和配置都装好了。还需要手动做 2 件事：" -ForegroundColor Cyan

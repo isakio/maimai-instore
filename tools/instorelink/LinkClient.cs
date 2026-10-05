@@ -100,11 +100,6 @@ namespace InStoreLink
             get { return _delayAvg; }
         }
 
-        public int DelayTick
-        {
-            get { return _delayIndex; }
-        }
-
         public bool Stopping
         {
             get { return _stopping; }
@@ -273,7 +268,18 @@ namespace InStoreLink
             {
                 case LinkCmd.CtlStart:
                     if (!string.IsNullOrEmpty(msg.Data))
+                    {
                         LinkLog.Info("服务端注册回应：" + msg.Data);
+                        // 服务端回的是 "version=N"；号对不上就提醒一句（协议相同但版本不同）
+                        int server;
+                        if (msg.Data.StartsWith("version=", StringComparison.Ordinal)
+                            && int.TryParse(msg.Data.Substring("version=".Length), out server)
+                            && server != LinkProto.Version)
+                        {
+                            LinkLog.Warn("服务端协议版本是 " + server + "，我们按 "
+                                         + LinkProto.Version + " 写的，可能会连不上");
+                        }
+                    }
                     break;
 
                 case LinkCmd.CtlHeartbeat:

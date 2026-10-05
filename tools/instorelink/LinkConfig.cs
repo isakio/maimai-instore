@@ -89,7 +89,8 @@ namespace InStoreLink
             Dictionary<string, string> kv = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             foreach (string raw in lines)
             {
-                string line = StripComment(raw).Trim();
+                // 首行可能带 UTF-8 BOM（比如 Windows 记事本 / PowerShell 写出来的）
+                string line = StripComment(raw.TrimStart('\uFEFF')).Trim();
                 if (line.Length == 0 || line.StartsWith("[", StringComparison.Ordinal)) continue;
                 int eq = line.IndexOf('=');
                 if (eq <= 0) continue;

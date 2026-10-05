@@ -45,8 +45,6 @@ namespace InStoreLink
         public const int DataIndex = 16;   // 数据字段的固定下标
         public const int FieldCount = 17;  // 一条消息的字段总数（含下标 0 的固定 1）
 
-        public const string HelloCommand = "1,3";   // 心跳的原样回包
-
         /// <summary>
         /// 命令号的日志名。刻意保持上游那套大写写法，这样我们的日志和上游日志能直接对比，
         /// 文档里引用的抓包也能对得上。
@@ -223,10 +221,5 @@ namespace InStoreLink
             return "W9" + random.Next(100000000, 999999999).ToString(CultureInfo.InvariantCulture);
         }
 
-        /// <summary>把伪 IP 的 uint32 形式转成点分十进制（日志用）。</summary>
-        public static string StubText(uint value)
-        {
-            return ToIp(value).ToString();
-        }
     }
 }
