@@ -189,7 +189,11 @@ namespace InStoreLink
             if (!__instance.IsConnectionFolder() || __result == null) return;
             IManager manager = LinkRuntime.PartyMan;
             if (manager == null) return;
-            List<RecruitInfo> list = manager.GetRecruitListWithoutMe();
+            // 必须用"真正翻译进联机歌曲列表"的那份（ConnectList）：大厅里的房间如果有
+            // 装不了的歌会被 ApplyConnectData 跳过，那时按原始列表取下标就会取错房间 ——
+            // 显示的是 A 的歌、进去的是 B 的房间。
+            List<RecruitInfo> list = LinkRuntime.ConnectList;
+            if (list == null) list = manager.GetRecruitListWithoutMe();
             if (list == null) return;
             if (__instance.CurrentMusicSelect >= 0 && __instance.CurrentMusicSelect < list.Count)
                 __result = list[__instance.CurrentMusicSelect];
@@ -207,9 +211,14 @@ namespace InStoreLink
 
             List<RecruitInfo> recruits = manager.GetRecruitListWithoutMe();
             // 本体原本靠"对方的 IP 是不是本机"来判断，这里直接按"有没有房间"来判断
-            if (!__instance.IsConnectingMusic && recruits != null && recruits.Count > 0)
+            List<RecruitInfo> shown = LinkRuntime.ConnectList;
+            if (shown == null) shown = recruits;
+            if (!__instance.IsConnectingMusic && shown != null && shown.Count > 0)
             {
-                RecruitInfo recruit = recruits[0];
+                // 和 RecruitData 那个 getter 用同一份列表，下标才对得上（光标停哪儿就是哪首歌）
+                int index = __instance.CurrentMusicSelect;
+                if (index < 0 || index >= shown.Count) index = 0;
+                RecruitInfo recruit = shown[index];
                 LinkLog.Info("选曲界面拿到房间数据：" + JsonUtility.ToJson(recruit));
                 if (LinkRuntime.SetRecruitData != null)
                     LinkRuntime.SetRecruitData.Invoke(__instance, new object[] { recruit });
@@ -243,44 +252,65 @@ namespace InStoreLink
 
             IManager manager = LinkRuntime.PartyMan;
             List<RecruitInfo> recruits = manager == null ? null : manager.GetRecruitListWithoutMe();
+            List<RecruitInfo> shown = new List<RecruitInfo>();
             if (recruits != null)
             {
                 foreach (RecruitInfo item in recruits)
                 {
-                    int musicId = item.MusicID;
-                    var music = Singleton<DataManager>.Instance.GetMusic(musicId);
-                    if (music == null) continue;
-
-                    CombineMusicSelectData combine = new CombineMusicSelectData();
-                    var notes = Singleton<NotesListManager>.Instance.GetNotesList()[musicId];
-                    // 没有谱面列表就没法构歌单（上游这里直接空引用崩游戏，我们跳过这条房间）
-                    if (notes == null || notes.NotesList == null)
-                    {
-                        LinkLog.Warn("曲目 " + musicId + " 没有谱面列表，这个房间先不显示");
-                        continue;
-                    }
-                    if (musicId < 10000) combine.existStandardScore = true;
-                    else if (musicId > 10000 && musicId < 20000) combine.existDeluxeScore = true;
-
-                    for (int i = 0; i < 2; i++)
-                        combine.musicSelectData.Add(new MusicSelectData(music, notes.NotesList, 0));
-                    connectList.Add(combine);
-
+                    // 整条房间的翻译都兜一层：`GetNotesList()[musicId]` 是按 musicID 索引的，
+                    // 歌不在这台机器的曲库/谱面表里时，可能是 null，也可能直接抛
+                    // IndexOutOfRange / KeyNotFound —— 而这里是 Unity 主线程，
+                    // 抛出去就是整局游戏崩掉（上游正是在这里崩的）。
+                    // 兜住之后：跳过这一条房间，其余房间照常显示。
                     try
                     {
-                        string thumbnail = music.thumbnailName;
-                        for (int j = 0; j < instance.MonitorArray.Length; j++)
+                        int musicId = item.MusicID;
+                        var music = Singleton<DataManager>.Instance.GetMusic(musicId);
+                        if (music == null)
                         {
-                            if (!instance.IsEntry(j)) continue;
-                            instance.MonitorArray[j].SetRecruitInfo(thumbnail);
-                            SoundManager.PlaySE(Cue.SE_INFO_NORMAL, j);
+                            LinkLog.Warn("曲目 " + musicId + " 不在本机曲库里，这个房间先不显示");
+                            continue;
                         }
-                    }
-                    catch (Exception) { /* 上游也是这么裸着吞的 */ }
 
-                    instance.IsConnectingMusic = true;
+                        CombineMusicSelectData combine = new CombineMusicSelectData();
+                        var notes = Singleton<NotesListManager>.Instance.GetNotesList()[musicId];
+                        // 没有谱面列表就没法构歌单（上游这里直接空引用崩游戏，我们跳过这条房间）
+                        if (notes == null || notes.NotesList == null)
+                        {
+                            LinkLog.Warn("曲目 " + musicId + " 没有谱面列表，这个房间先不显示");
+                            continue;
+                        }
+                        if (musicId < 10000) combine.existStandardScore = true;
+                        else if (musicId > 10000 && musicId < 20000) combine.existDeluxeScore = true;
+
+                        for (int i = 0; i < 2; i++)
+                            combine.musicSelectData.Add(new MusicSelectData(music, notes.NotesList, 0));
+                        connectList.Add(combine);
+                        // 下标映射就在这一行定下来：ConnectList 的第 n 项 = 光标第 n 格
+                        shown.Add(item);
+
+                        try
+                        {
+                            string thumbnail = music.thumbnailName;
+                            for (int j = 0; j < instance.MonitorArray.Length; j++)
+                            {
+                                if (!instance.IsEntry(j)) continue;
+                                instance.MonitorArray[j].SetRecruitInfo(thumbnail);
+                                SoundManager.PlaySE(Cue.SE_INFO_NORMAL, j);
+                            }
+                        }
+                        catch (Exception) { /* 上游也是这么裸着吞的 */ }
+
+                        instance.IsConnectingMusic = true;
+                    }
+                    catch (Exception ex)
+                    {
+                        LinkLog.Warn("房间（曲目 " + item.MusicID + "）翻译失败，跳过：" + ex.Message);
+                    }
                 }
             }
+            // 记下"这次真正显示出来的是哪些房间、什么顺序"，供 RecruitData getter 按光标取
+            LinkRuntime.ConnectList = shown;
 
             // 一个房间都没有时也要放一格占位，否则那一栏是空的、光标没地方停
             if (recruits == null || recruits.Count == 0)

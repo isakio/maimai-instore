@@ -7,6 +7,10 @@
 // 这里改成一条一条挂：自己从 HarmonyPatch 特性里读出目标方法，单独 patch，
 // 逐条打印成功/失败 + 完整异常。失败的那条只影响它自己，日志里直接点名。
 // 代价是启动时多几十次反射调用，可以忽略。
+//
+// 逐条的成功行（`✓ 补丁名 → 目标方法`）**不受 Debug 开关影响**，一律打出来：
+// 文档里就是让玩家拿这 33 行确认"插件在这台机器上挂上了没有"（和 InStoreMatch
+// 那份打印 7 行"挂钩成功"的插件保持一致）。心跳、每个包那些才是 Debug 才有的。
 
 using System;
 using System.Reflection;
@@ -45,8 +49,9 @@ namespace InStoreLink
                     HarmonyMethod postfix = IsPrefix(patch) ? null : new HarmonyMethod(patch);
                     harmony.Patch(target, prefix, postfix);
                     ok++;
-                    LinkLog.Info("  ✓ " + patch.Name + " → "
-                                 + target.DeclaringType.Name + "." + target.Name);
+                    // 用 Msg：这一行是给玩家/排查用的验收信息，不能只在 Debug 下出现
+                    LinkLog.Msg("  ✓ " + patch.Name + " → "
+                                + target.DeclaringType.Name + "." + target.Name);
                 }
                 catch (Exception ex)
                 {

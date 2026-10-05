@@ -144,8 +144,10 @@ namespace InStoreLink
         [HarmonyPatch(typeof(SocketBase), "error", typeof(string), typeof(int))]
         public static bool PreSocketError(string message, int no)
         {
-            // 本体经常用它打无关痛痒的噪音（比如 Skip Startup Network Check 之后）
-            LinkLog.Error("本体网络层报错：" + message + " (" + no + ")");
+            // 本体经常用它打无关痛痒的噪音（比如跳过联网自检之后的 "send failed null"）。
+            // 用 Warn 而不是 Error：这是**本体**的网络层抱怨，不代表我们的插件坏了，
+            // 打成 Error 会让人在日志里一眼看到一片红、误判成 mod 出问题。
+            LinkLog.Warn("本体网络层报错（与本插件无关，供排查）：" + message + " (" + no + ")");
             return true;
         }
 
@@ -344,7 +346,9 @@ namespace InStoreLink
         public static bool PreNFBind(NFSocket __instance, EndPoint localEndP)
         {
             LinkSocket shadow = Shadow(__instance);
-            if (shadow != null) shadow.Bind(localEndP);
+            // 没有影子 socket 就交回本体：拦着不 bind 会让这个真 socket 永远没绑上
+            if (shadow == null) return NoShadow(__instance, "Bind");
+            shadow.Bind(localEndP);
             return false;
         }
 
@@ -353,7 +357,8 @@ namespace InStoreLink
         public static bool PreNFListen(NFSocket __instance, int backlog)
         {
             LinkSocket shadow = Shadow(__instance);
-            if (shadow != null) shadow.Listen(backlog);
+            if (shadow == null) return NoShadow(__instance, "Listen");
+            shadow.Listen(backlog);
             return false;
         }
 
@@ -394,7 +399,8 @@ namespace InStoreLink
             SocketOptionName optionName, bool optionValue)
         {
             LinkSocket shadow = Shadow(__instance);
-            if (shadow != null) shadow.SetSocketOption(optionLevel, optionName, optionValue);
+            if (shadow == null) return NoShadow(__instance, "SetSocketOption");
+            shadow.SetSocketOption(optionLevel, optionName, optionValue);
             return false;
         }
 
@@ -424,7 +430,10 @@ namespace InStoreLink
         public static bool PreNFGetRemoteEndPoint(NFSocket __instance, ref EndPoint __result)
         {
             LinkSocket shadow = Shadow(__instance);
-            __result = shadow == null ? null : shadow.RemoteEndPoint;
+            // 拿不到影子对象时不能返回 null：调用方（本体）会直接取端口/.ToString()，
+            // 那就变成 NullReferenceException。交给本体原生的 getter 拿真地址更安全。
+            if (shadow == null) return NoShadow(__instance, "RemoteEndPoint");
+            __result = shadow.RemoteEndPoint;
             return false;
         }
 
@@ -433,7 +442,8 @@ namespace InStoreLink
         public static bool PreNFGetLocalEndPoint(NFSocket __instance, ref EndPoint __result)
         {
             LinkSocket shadow = Shadow(__instance);
-            __result = shadow == null ? null : shadow.LocalEndPoint;
+            if (shadow == null) return NoShadow(__instance, "LocalEndPoint");
+            __result = shadow.LocalEndPoint;
             return false;
         }
     }

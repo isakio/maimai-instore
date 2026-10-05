@@ -226,7 +226,7 @@ RecruitInfo
 | `PreMyIpAddress` | `PartyLink.Util.MyIpAddress` | 把本机地址换成伪 IP —— 整套寻址的地基 |
 | `PostStartupOnUpdate` | `Process.StartupProcess.OnUpdate` | 跳过本体联网自检（状态 `0x04`→`0x08`）并手动拉起 party 相关服务；顺带写开机自检那三行状态 |
 | `PrePacketEncrypt` / `PrePacketDecrypt` | `PartyLink.Packet.encrypt/decrypt` | 把加解密换成"原样拷贝 + 写长度"，隧道里跑明文（否则服务端没法转发） |
-| `PostNFSocketCtor` 等 14 个 | `PartyLink.NFSocket.*` | 影子 socket：把本体的每个 socket 调用转到我们的实现上 |
+| `PostNFSocketCtor` 等 16 个 | `PartyLink.NFSocket.*` | 影子 socket：把本体的每个 socket 调用转到我们的实现上。**拿不到影子对象时一律 `return true`（交回本体原生实现）** —— 包括 `RemoteEndPoint`/`LocalEndPoint` 两个 getter：它们以前返回 `null`，而调用方会直接取端口，那就变成 `NullReferenceException` |
 | `PostClientCtor` | `Manager.Party.Party.Client` 构造 | 开始轮询 `/recruit/list` |
 | `PreRecvStartRecruit` | `Client.RecvStartRecruit` | 对方选的歌没装就拦掉并提示（不拦会崩） |
 | `PreMusicSelectOnStart` / `PostPartyExec` | `MusicSelectProcess` | 进界面重置状态；房间列表变了重画；右侧显示"谁在等" |
@@ -279,6 +279,10 @@ RecruitInfo
 | 6 | 日志文案统一成 `InStoreLink` / 中文状态（离线/未连接/连接中） | 顺便去掉了上游写在自检界面的彩蛋（`CAT :3`、`CRAZY THURSDAY`） |
 | 7 | 记录最后一次连接错误、日志级别更清楚 | 排查"连不上中继"时不用翻整份日志 |
 | 8 | 服务器 `/recruit/list` 的解析做了空行/坏行容错 | 上游任何一行 JSON 坏掉都会抛，整轮轮询白跑 |
+| 9 | 逐条 `✓ 补丁名 → 目标方法` **不受 `Debug` 开关影响**，一律打出来 | 这 33 行是文档里让玩家确认"插件在这台机器上挂上了没有"的验收依据；以前它走 `LinkLog.Info`（Debug 才打），默认配置下一条都看不到 |
+| 10 | `ApplyConnectData` 里把房间翻译进联机歌曲列表时**整条兜一层异常** | `GetNotesList()[musicId]` 是按曲目 ID 索引的，歌不在这台机器的谱面表里时可能返回 null、也可能直接抛越界/KeyNotFound；这是在 Unity 主线程上，抛出去就是整局崩（上游正是在这里崩的）。兜住之后只跳过这一条房间 |
+| 11 | 新增 `LinkRuntime.ConnectList`：**记住真正显示出来的房间顺序**，`RecruitData` getter 按光标取时用它 | 大厅里装不了的歌会被跳过，此时"光标第 n 格"和"原始房间列表第 n 项"不是同一个房间 —— 会变成显示 A 的歌、进去却是 B 的房间 |
+| 12 | 本体 `SocketBase.error` 的噪音降级成 `Warn`，并写明"与本插件无关" | 它本来就是游戏网络层自己抱怨（`send failed null (0)`），以前打成 `Error`，日志里一片红，容易误判成 mod 坏了 |
 
 > 和 `InStoreMatch.dll` 的关系：那个负责**让分类栏出现「店内マッチング」这一格**（本体快照问题），
 > 这个负责**把那一格接到公网**。两个都要装，而且装了 `InStoreLink.dll` 就**必须删掉

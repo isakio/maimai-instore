@@ -116,7 +116,7 @@
 
 | 文件 | 干什么 | 校验 |
 | --- | --- | --- |
-| [`client/InStoreLink.dll`](client/InStoreLink.dll) | 联机本体：注册中继、开房、把对方的房间喂回游戏 | v0.1，48640 字节 / md5 `57bc31c686498f835b5dc10de8dfe1f4` |
+| [`client/InStoreLink.dll`](client/InStoreLink.dll) | 联机本体：注册中继、开房、把对方的房间喂回游戏 | v0.1，49152 字节 / md5 `072c2d082ad9f527fb80b12c48537e9b` |
 | [`client/InStoreMatch.dll`](client/InStoreMatch.dll) | 让选曲界面画出「店内マッチング」那一格 | v2.5，18432 字节 / md5 `1a94a9b6be9b03bfb274e41b0a8256b3` |
 
 两个文件都在本仓库的 [`client/`](client/) 里（[最新 Release](https://github.com/isakio/maimai-instore/releases/latest) 也附了），不用再去别的地方下。

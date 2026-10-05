@@ -42,6 +42,14 @@ namespace InStoreLink
         /// <summary>上一次招募列表快照，key = "伪IP : 曲目ID"。</summary>
         public static Dictionary<string, RecruitInfo> LastRecruits = new Dictionary<string, RecruitInfo>();
 
+        /// <summary>
+        /// 最近一次真正翻译进"联机歌曲列表"的房间，**顺序就是游戏里光标的下标顺序**。
+        /// 和 LastRecruits（大厅原始列表）不是一回事：装不了的歌会被跳过，
+        /// 所以按光标取房间必须用这一份，否则会显示 A 的歌、进去却是 B 的房间。
+        /// null = 还没翻译过（那时才退回用原始列表）。
+        /// </summary>
+        public static List<RecruitInfo> ConnectList;
+
         public static int OnlineUserCount;
         public static int MusicIdSum;
         public static bool SideMessageFlag;

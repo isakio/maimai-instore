@@ -12,6 +12,7 @@
   3. 补丁条数（从源码数出来的）和文档里写的是否一致
   4. 旧名字残留（WLDiag / nyanlinkd / install-instorematch / NYD_ 之类）
   5. third_party/ 里不该有二进制（README 承诺"不再分发第三方二进制"）
+  6. 文档让人拿"33 行 ✓"做验收 —— 那 33 行就必须真的在默认配置下打出来
 
 注意：`docs/技术笔记.md` 是**历史排错记录**，里面刻意保留着当时的旧名字/旧 md5，
 所以对它只检查链接，不做其余四项。
@@ -126,6 +127,10 @@ def main():
         ("docs/给朋友看-安装步骤.md", "共 %d 条生效" % total_patches),
         ("docs/双人联机配置清单.md", "共 %d 条生效" % total_patches),
         ("docs/客户端mod实现.md", "%d 条补丁" % total_patches),
+        # 「N 行 ✓」这个说法出现在这几份"照着做"的文档里，行数必须等于补丁条数
+        ("README.md", "%d 行" % total_patches),
+        ("docs/给朋友看-安装步骤.md", "%d 行" % total_patches),
+        ("docs/双人联机配置清单.md", "%d 行" % total_patches),
     ]
     bad = []
     for rel, needle in wants:
@@ -166,6 +171,24 @@ def main():
             if f.endswith((".dll", ".exe", ".jar", ".zip", ".tar", ".gz")):
                 found.append(os.path.relpath(os.path.join(root, f), ROOT))
     check(not found, "third_party/ 里只有文档（没有第三方二进制）", "\n      ".join(found))
+
+    # ---------------------------------------------------- 6. 验收日志真的会打出来吗
+    # 踩过：这几份文档都写着"日志里会有 33 行 ✓ 补丁名 → 目标方法"，
+    # 而源码里那行是 LinkLog.Info（只在 Debug=true 时打）——
+    # 默认配置的玩家照着文档去找，一条都找不到，会以为插件没加载。
+    print("6) 验收日志：逐条 ✓ 是否常显")
+    patching = read(os.path.join(ROOT, "tools", "instorelink", "LinkPatching.cs"))
+    always = re.search(r'LinkLog\.Msg\(\s*"\s*✓', patching) is not None
+    debug_only = re.search(r'LinkLog\.Info\(\s*"\s*✓', patching) is not None
+    check(always and not debug_only,
+          "InStoreLink 的逐条 ✓ 用 LinkLog.Msg（不受 Debug 开关影响）",
+          "LinkPatching.cs 里那条变成 LinkLog.Info 了：默认 Debug=false 时一行都不会打，"
+          "而文档还在让人拿这 %d 行做验收" % total_patches)
+
+    match = read(os.path.join(ROOT, "tools", "InStoreMatch.cs"))
+    check("MelonLogger.Msg(\"[InStoreMatch] 挂钩成功" in match,
+          "InStoreMatch 的挂钩成功行也是常显（MelonLogger.Msg）",
+          "InStoreMatch.cs 里的挂钩成功行被改成有条件打印了")
 
     print()
     if FAIL:
