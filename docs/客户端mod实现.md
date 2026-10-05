@@ -384,6 +384,7 @@ bash tests/run_all.sh        # 十步全跑，一分钟左右
 | `tests/py/test_vectors.py` | 同一批向量 + **用真实抓包日志反验**（17 项；给出 `MAIMAI_LOGS` 时 18 项） | ✅ 全绿（12 种真实报文全部能还原） |
 | `tests/py/test_e2e.py` | 起真的 instorematchd，跑完 开房→列表→建流→传数据→关流→关房（18 项） | ✅ 全绿 |
 | `tests/py/test_edge.py` | **异常流程**：房主先开打 / 目标不在线 / 反复重试 / 挂起超时回收 / 身份校验 / 限速与房间上限（14 项） | ✅ 全绿 |
+| `tests/py/live_smoke.py` | **线上烟测**（不放进 `run_all.sh`，会往公开大厅临时开房）：对着真在跑的大厅把上面那些场景再走一遍，外加"第二个房客""房主中途掉线""房间 TTL vs 续报"（20 项） | ✅ 全绿（打的就是 `isakio.cn`） |
 | `tests/GameCompatProbe.cs` | **游戏兼容性探针**：补丁目标方法是否存在、注入字段类型是否匹配、反射句柄拿不拿得到（60 项） | ✅ 全绿 |
 | `tools/check_patch_params.cs` | **参数名检查**：两个 dll 的补丁（InStoreLink 33 条 + InStoreMatch 8 个补丁方法）的普通参数名逐个和游戏对齐，外加 Prefix/Postfix 标注、`___字段` 是否存在（Harmony 是按名字传参的） | ✅ 全绿 |
 | `tools/fingerprint.cs` | **发行版指纹**：`client/` 里那两个 dll 是不是真的由当前源码编出来的（csc 输出不可复现，md5 比不出来） | ✅ 全绿 |
@@ -397,6 +398,8 @@ bash tests/run_probe.sh      # 临时把探针拷进 Managed\ 执行，跑完自
 bash tests/run_param_check.sh  # 只查参数名（秒级）
 bash tests/run_fingerprint.sh  # 只查发行版 dll 有没有落后于源码
 bash tests/run_release_check.sh  # 只查 Release 附件有没有落后于 client/（发版后跑，需要 gh + 联网）
+python3 tests/py/live_smoke.py   # 打线上大厅跑一轮烟测（上线后跑；会临时开房，约 2 分钟）
+#   换台服务器：IMD_LIVE_HOST=1.2.3.4 python3 tests/py/live_smoke.py
 
 # 手里有联机时抓的 *.log 时，第 3 步会额外拿真实报文再验一遍（不设就跳过）
 MAIMAI_LOGS=/path/to/logs bash tests/run_all.sh
