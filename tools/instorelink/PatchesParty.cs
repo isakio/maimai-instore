@@ -105,7 +105,7 @@ namespace InStoreLink
 
                 float last;
                 if (_deliveredAt.TryGetValue(kv.Key, out last) &&
-                    UnityEngine.Time.time - last < 10f) continue;      // 刚喂过，等游戏收下
+                    UnityEngine.Time.time - last < 2f) continue;       // 刚喂过，等游戏收下
 
                 try
                 {
@@ -294,12 +294,16 @@ namespace InStoreLink
             if (manager == null) return false;
 
             List<RecruitInfo> recruits = manager.GetRecruitListWithoutMe();
-            // 本体原本靠"对方的 IP 是不是本机"来判断，这里直接按"有没有房间"来判断
-            List<RecruitInfo> shown = LinkRuntime.ConnectList;
-            if (shown == null) shown = recruits;
-            if (!__instance.IsConnectingMusic && shown != null && shown.Count > 0)
+            if (recruits == null) recruits = new List<RecruitInfo>();
+            // 本体原本靠"对方的 IP 是不是本机"来判断，这里直接按"有没有房间"来判断。
+            // 注意：判断依据必须是**游戏现在真的有哪些房间**（recruits），不能拿 ConnectList ——
+            // 那是"上一次显示过的顺序"，可能是空的/过期的（踩过：房间明明喂进去了，分类栏却一直空着）。
+            if (!__instance.IsConnectingMusic && recruits.Count > 0)
             {
-                // 和 RecruitData 那个 getter 用同一份列表，下标才对得上（光标停哪儿就是哪首歌）
+                // 取"当前光标对应的那个房间"：用 ConnectList 保证下标和显示顺序一致，
+                // 它没准备好（空/没有）时退回游戏自己的列表。
+                List<RecruitInfo> shown = LinkRuntime.ConnectList;
+                if (shown == null || shown.Count == 0) shown = recruits;
                 int index = __instance.CurrentMusicSelect;
                 if (index < 0 || index >= shown.Count) index = 0;
                 RecruitInfo recruit = shown[index];
