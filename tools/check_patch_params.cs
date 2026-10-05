@@ -7,8 +7,13 @@
 // 这个坑在我们这儿真踩过（把 nfSocket 写成了 socket），所以做成自动检查。
 //
 // 顺带查另外两类编译期看不出来、只在运行时炸的错误：
-//   · 补丁方法忘了带 [HarmonyPrefix] / [HarmonyPostfix]（Harmony 会直接拒绝这条补丁）
+//   · 补丁方法忘了带 [HarmonyPrefix] / [HarmonyPostfix] / [HarmonyFinalizer]（Harmony 会拒绝）
 //   · `___字段` 注入的字段在目标类型里根本不存在（注入失败 = 这条补丁等于没打）
+//
+// 两种写法都认：
+//   · [HarmonyPatch] + [HarmonyPostfix] 都打在方法上（InStoreLink 这样写）
+//   · [HarmonyPatch] 打在类上，类里放一个名字叫 Postfix 的方法（InStoreMatch 这样写，
+//     方法名本身就是 Harmony 的种类约定，没有额外特性）
 //
 //   csc /r:Mono.Cecil.dll /out:check_patch_params.exe check_patch_params.cs
 //   check_patch_params.exe <我们的dll> <游戏 Assembly-CSharp.dll>
@@ -71,13 +76,21 @@ public static class CheckPatchParams
         Console.WriteLine("游戏程序集：" + game.Name.Name);
         Console.WriteLine();
 
-        foreach (TypeDefinition type in ours.MainModule.Types)
+        // 顶层类型 + 所有嵌套类型：InStoreMatch 的补丁类就是嵌在 InStoreMatchMod 里的，
+        // 只看顶层类型会把它们整个漏掉。
+        foreach (TypeDefinition type in AllTypes(ours.MainModule))
         {
+            CustomAttribute typeAttr = type.CustomAttributes.FirstOrDefault(IsHarmonyPatch);
             foreach (MethodDefinition patch in type.Methods)
             {
-                CustomAttribute attr = patch.CustomAttributes
-                    .FirstOrDefault(a => a.AttributeType.Name == "HarmonyPatch");
-                if (attr == null) continue;
+                // 方法级特性优先；没有就看类级（类级时要靠 Prefix/Postfix/Finalizer 认出补丁方法，
+                // 否则类里的辅助方法会被当成补丁一起检查）
+                CustomAttribute attr = patch.CustomAttributes.FirstOrDefault(IsHarmonyPatch);
+                if (attr == null)
+                {
+                    if (typeAttr == null || PatchKind(patch) == null) continue;
+                    attr = typeAttr;
+                }
                 try
                 {
                     Check(resolver, game, type, patch, attr);
@@ -99,21 +112,61 @@ public static class CheckPatchParams
         return _bad == 0 ? 0 : 1;
     }
 
+    private static bool IsHarmonyPatch(CustomAttribute a)
+    {
+        return a.AttributeType.Name == "HarmonyPatch";
+    }
+
+    /// <summary>
+    /// 补丁的种类。两种写法都认：特性（[HarmonyPrefix] 之类），
+    /// 或者类级 [HarmonyPatch] 下的方法名约定（Prefix / Postfix / Transpiler / Finalizer）。
+    /// </summary>
+    private static string PatchKind(MethodDefinition m)
+    {
+        foreach (string kind in new[] { "Prefix", "Postfix", "Transpiler", "Finalizer" })
+        {
+            if (m.CustomAttributes.Any(a => a.AttributeType.Name == "Harmony" + kind)) return kind;
+        }
+        if (m.Name == "Prefix" || m.Name == "Postfix" || m.Name == "Transpiler"
+            || m.Name == "Finalizer")
+            return m.Name;
+        return null;
+    }
+
+    private static IEnumerable<TypeDefinition> AllTypes(ModuleDefinition module)
+    {
+        foreach (TypeDefinition t in module.Types)
+            foreach (TypeDefinition nested in Walk(t))
+                yield return nested;
+    }
+
+    private static IEnumerable<TypeDefinition> Walk(TypeDefinition type)
+    {
+        yield return type;
+        foreach (TypeDefinition nested in type.NestedTypes)
+            foreach (TypeDefinition inner in Walk(nested))
+                yield return inner;
+    }
+
     private static void Check(IAssemblyResolver resolver, AssemblyDefinition game,
         TypeDefinition patchType, MethodDefinition patch, CustomAttribute attr)
     {
         _checked++;
         string patchName = patchType.Name + "." + patch.Name;
 
-        // (1) 必须正好是 Prefix 或 Postfix 之一，否则 Harmony 直接拒绝这条补丁
-        bool isPrefix = patch.CustomAttributes.Any(a => a.AttributeType.Name == "HarmonyPrefix");
-        bool isPostfix = patch.CustomAttributes.Any(a => a.AttributeType.Name == "HarmonyPostfix");
-        if (isPrefix == isPostfix)
+        // (1) 必须能认出种类（特性或方法名），而且不能 Prefix + Postfix 同时标
+        bool attrPrefix = patch.CustomAttributes.Any(a => a.AttributeType.Name == "HarmonyPrefix");
+        bool attrPostfix = patch.CustomAttributes.Any(a => a.AttributeType.Name == "HarmonyPostfix");
+        if (attrPrefix && attrPostfix)
         {
-            // 两个都没有、或者两个都有（后者多半是复制粘贴留下的），都报出来
-            Report(false, patchName, isPrefix
-                ? "同时带了 [HarmonyPrefix] 和 [HarmonyPostfix]，Harmony 只认一个"
-                : "既没有 [HarmonyPrefix] 也没有 [HarmonyPostfix]，Harmony 会拒绝这条补丁");
+            Report(false, patchName, "同时带了 [HarmonyPrefix] 和 [HarmonyPostfix]，Harmony 只认一个");
+            return;
+        }
+        if (PatchKind(patch) == null)
+        {
+            Report(false, patchName,
+                "认不出这是 Prefix 还是 Postfix —— 既没有 [HarmonyPrefix] / [HarmonyPostfix] "
+                + "/ [HarmonyFinalizer]，方法名也不是 Prefix / Postfix / Transpiler / Finalizer");
             return;
         }
 

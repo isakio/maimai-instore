@@ -30,9 +30,14 @@ to_win() {
 }
 
 mkdir -p "$ROOT/build"
+rm -f "$ROOT/build/GameCompatProbe.exe"      # 同 run_param_check：别让编译失败后拿旧 exe 报绿
 "$CSC" /target:exe /nologo /langversion:5 \
     "/out:$(to_win "$ROOT/build")\\GameCompatProbe.exe" \
     "$(to_win "$ROOT/tests/GameCompatProbe.cs")" 2>&1 | iconv -f GBK -t UTF-8 2>/dev/null
+if [ ! -f "$ROOT/build/GameCompatProbe.exe" ]; then
+    echo "探针编译失败（见上面 csc 的输出）" >&2
+    exit 1
+fi
 
 TARGET="$GAME/Sinmai_Data/Managed/GameCompatProbe.exe"
 cp "$ROOT/build/GameCompatProbe.exe" "$TARGET"

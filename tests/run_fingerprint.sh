@@ -34,6 +34,7 @@ mkdir -p "$ROOT/build"
 cp -f "$CECIL" "$ROOT/build/Mono.Cecil.dll"
 
 # 1) 编指纹工具
+rm -f "$ROOT/build/fingerprint.exe"      # 同上：编译失败时别拿上一次的 exe 报绿
 "$CSC" /target:exe /nologo /langversion:5 \
     "/r:$(to_win "$CECIL")" "/out:$(to_win "$ROOT/build")\\fingerprint.exe" \
     "$(to_win "$ROOT/tools/fingerprint.cs")" 2>&1 | iconv -f GBK -t UTF-8 2>/dev/null
@@ -47,6 +48,7 @@ fi
 #    （踩过：改完源码单独跑这个脚本，build/ 里还是上一次的 dll，白高兴一场）
 bash "$ROOT/tools/build_wsl.sh" "$GAME" || exit 1
 # InStoreMatch 是单文件、零点几秒，也一并重编
+rm -f "$ROOT/build/InStoreMatch.dll"
 IM_ARGS=(/target:library /nologo /optimize+ "/out:$(to_win "$ROOT/build")\\InStoreMatch.dll")
 for ref in \
     "MelonLoader\\net35\\MelonLoader.dll" \
@@ -59,6 +61,10 @@ for ref in \
 done
 IM_ARGS+=("$(to_win "$ROOT/tools/InStoreMatch.cs")")
 "$CSC" "${IM_ARGS[@]}" 2>&1 | iconv -f GBK -t UTF-8 2>/dev/null
+if [ ! -f "$ROOT/build/InStoreMatch.dll" ]; then
+    echo "InStoreMatch.dll 编译失败（见上面 csc 的输出）" >&2
+    exit 1
+fi
 
 # 3) 逐对比较
 RC=0

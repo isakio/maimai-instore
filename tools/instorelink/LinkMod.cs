@@ -32,7 +32,7 @@ namespace InStoreLink
         public override void OnInitializeMelon()
         {
             string note;
-            string configPath = LocateConfig(out note);
+            string configPath = LocateConfig();
             LinkRuntime.Config = LinkConfig.Load(configPath, out note);
             LinkLog.Verbose = LinkRuntime.Config.Debug;
 
@@ -54,9 +54,8 @@ namespace InStoreLink
         /// 有些启动器会把当前目录设到别处，那时相对路径找不到会静默回落默认大厅
         /// （自建大厅的人会莫名其妙连到我们这台）。
         /// </summary>
-        private static string LocateConfig(out string note)
+        private static string LocateConfig()
         {
-            note = null;
             string root = null;
             try { root = AppDomain.CurrentDomain.BaseDirectory; }
             catch (Exception) { }

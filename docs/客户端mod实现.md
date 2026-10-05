@@ -344,7 +344,7 @@ bash tests/run_all.sh        # 八步全跑，半分钟左右
 | `tests/py/test_vectors.py` | 同一批向量 + **用真实抓包日志反验**（18 项） | ✅ 全绿（12 种真实报文全部能还原） |
 | `tests/py/test_e2e.py` | 起真的 instorematchd，跑完 开房→列表→建流→传数据→关流→关房（17 项） | ✅ 全绿 |
 | `tests/GameCompatProbe.cs` | **游戏兼容性探针**：补丁目标方法是否存在、注入字段类型是否匹配、反射句柄拿不拿得到（60 项） | ✅ 全绿 |
-| `tools/check_patch_params.cs` | **参数名检查**：33 条补丁的普通参数名逐个和游戏对齐，外加 Prefix/Postfix 标注、`___字段` 是否存在（Harmony 是按名字传参的） | ✅ 全绿 |
+| `tools/check_patch_params.cs` | **参数名检查**：两个 dll 的补丁（InStoreLink 33 条 + InStoreMatch 8 个补丁方法）的普通参数名逐个和游戏对齐，外加 Prefix/Postfix 标注、`___字段` 是否存在（Harmony 是按名字传参的） | ✅ 全绿 |
 | `tools/fingerprint.cs` | **发行版指纹**：`client/` 里那两个 dll 是不是真的由当前源码编出来的（csc 输出不可复现，md5 比不出来） | ✅ 全绿 |
 | `tests/py/test_docs.py` | **文档一致性**：发行 dll 的字节数 / md5、Markdown 相对链接、补丁条数、旧名字残留、`third_party/` 里有没有二进制 | ✅ 全绿 |
 

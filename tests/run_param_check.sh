@@ -23,14 +23,17 @@ if [ ! -f "$CECIL_WSL" ]; then
     exit 1
 fi
 # 要查哪些程序集：
+#   两个 dll 都查：InStoreLink（33 条补丁）+ InStoreMatch（7 条，补丁类是嵌套的）
 #   build/  —— 刚编出来的，源码一改就能第一时间发现回归
 #   client/ —— 真正发给用户的那一份，能发现"源码改了但忘了重编发行版"
-# 两个都在就都查；只要求至少有一个，方便单独跑源码那份。
+# 存在的就查；只要求至少有一个，方便单独跑源码那份。
 DLLS=()
-[ -f "$ROOT/build/InStoreLink.dll" ] && DLLS+=("$ROOT/build/InStoreLink.dll")
-[ -f "$ROOT/client/InStoreLink.dll" ] && DLLS+=("$ROOT/client/InStoreLink.dll")
+for d in "build/InStoreLink.dll" "client/InStoreLink.dll" \
+         "build/InStoreMatch.dll" "client/InStoreMatch.dll"; do
+    [ -f "$ROOT/$d" ] && DLLS+=("$ROOT/$d")
+done
 if [ ${#DLLS[@]} -eq 0 ]; then
-    echo "build/ 和 client/ 里都没有 InStoreLink.dll，先跑 tools/build_wsl.sh" >&2
+    echo "build/ 和 client/ 里都没有 InStoreLink.dll / InStoreMatch.dll，先跑 tools/build_wsl.sh" >&2
     exit 1
 fi
 
@@ -43,9 +46,15 @@ to_win() {
 # 检查器 exe 要和 Mono.Cecil.dll 放一起才跑得起来
 mkdir -p "$ROOT/build"
 cp -f "$CECIL_WSL" "$ROOT/build/Mono.Cecil.dll"
+# 先删旧的：编译失败时如果还留着上一次的 exe，会拿旧程序乱报"全部对得上"
+rm -f "$ROOT/build/check_patch_params.exe"
 "$CSC" /target:exe /nologo \
     "/r:$(to_win "$CECIL_WSL")" "/out:$(to_win "$ROOT/build")\\check_patch_params.exe" \
     "$(to_win "$ROOT/tools/check_patch_params.cs")" 2>&1 | iconv -f GBK -t UTF-8 2>/dev/null
+if [ ! -f "$ROOT/build/check_patch_params.exe" ]; then
+    echo "检查器编译失败（见上面 csc 的输出）" >&2
+    exit 1
+fi
 chmod +x "$ROOT/build/check_patch_params.exe"
 
 RC=0
