@@ -214,7 +214,7 @@ RecruitInfo
 问题是"加入别人房间"这件事有一堆走不到正常结局的岔路，而两边都不知道对方已经不在了 ——
 房客的表现就是**一直卡在"连接中"**，房主的表现是有个看不见的人挂着。
 
-v0.2 补上这几条（服务端 `instorematchd`，客户端配合）：
+v0.3 补上这几条（服务端 `instorematchd`，客户端配合）：
 
 | 触发 | 服务端做什么 | 房客（发起方）会看到 |
 | --- | --- | --- |
@@ -240,7 +240,7 @@ v0.2 补上这几条（服务端 `instorematchd`，客户端配合）：
 ## 五、与游戏本体的耦合点（补丁清单）
 
 这是"改东西时最容易踩雷"的地方。[`tools/instorelink/PatchesNet.cs`](../tools/instorelink/PatchesNet.cs)
-和 [`PatchesParty.cs`](../tools/instorelink/PatchesParty.cs) 一共 33 个补丁：
+和 [`PatchesParty.cs`](../tools/instorelink/PatchesParty.cs) 一共 34 条补丁：
 
 | 补丁 | 目标 | 为什么必须 |
 | --- | --- | --- |
@@ -256,6 +256,7 @@ v0.2 补上这几条（服务端 `instorematchd`，客户端配合）：
 | `PostNFSocketCtor` 等 16 个 | `PartyLink.NFSocket.*` | 影子 socket：把本体的每个 socket 调用转到我们的实现上。**拿不到影子对象时一律 `return true`（交回本体原生实现）** —— 包括 `RemoteEndPoint`/`LocalEndPoint` 两个 getter：它们以前返回 `null`，而调用方会直接取端口，那就变成 `NullReferenceException` |
 | `PostClientCtor` | `Manager.Party.Party.Client` 构造 | 开始轮询 `/recruit/list` |
 | `PreRecvStartRecruit` | `Client.RecvStartRecruit` | 对方选的歌没装就拦掉并提示（不拦会崩） |
+| `PreConnectSocketExecute` | `PartyLink.ConnectSocket.Execute_Connect` | **加入失败时走本体自己的错误路径**。本体只看"完成事件来过"就当连上了（`Execute_Connect` 只检查 `_connectDone`，不看 `SocketError`；`Party.Client` 又先判 `isActive()` 再判 `isError()`），所以失败时不能触发 Completed，只能调 `SocketBase.error()` 让游戏进它自己的错误状态。见 [`LinkClient.FailAccept`](../tools/instorelink/LinkClient.cs) |
 | `PreMusicSelectOnStart` / `PostPartyExec` | `MusicSelectProcess` | 进界面重置状态；房间列表变了重画；右侧显示"谁在等" |
 | `PostRecruitData` | `MusicSelectProcess.RecruitData` getter | 光标停在第几条就用第几个房间 |
 | `PreIsConnectStart` / `PreSetConnectData` | `MusicSelectProcess.IsConnectStart/SetConnectData` | 把房间列表翻译成本体的"联机歌曲列表"（缩略图、SE、按钮） |
@@ -306,7 +307,7 @@ v0.2 补上这几条（服务端 `instorematchd`，客户端配合）：
 | 6 | 日志文案统一成 `InStoreLink` / 中文状态（离线/未连接/连接中） | 顺便去掉了上游写在自检界面的彩蛋（`CAT :3`、`CRAZY THURSDAY`） |
 | 7 | 记录最后一次连接错误、日志级别更清楚 | 排查"连不上中继"时不用翻整份日志 |
 | 8 | 服务器 `/recruit/list` 的解析做了空行/坏行容错 | 上游任何一行 JSON 坏掉都会抛，整轮轮询白跑 |
-| 9 | 逐条 `✓ 补丁名 → 目标方法` **不受 `Debug` 开关影响**，一律打出来 | 这 33 行是文档里让玩家确认"插件在这台机器上挂上了没有"的验收依据；以前它走 `LinkLog.Info`（Debug 才打），默认配置下一条都看不到 |
+| 9 | 逐条 `✓ 补丁名 → 目标方法` **不受 `Debug` 开关影响**，一律打出来 | 这 34 行是文档里让玩家确认"插件在这台机器上挂上了没有"的验收依据；以前它走 `LinkLog.Info`（Debug 才打），默认配置下一条都看不到 |
 | 10 | `ApplyConnectData` 里把房间翻译进联机歌曲列表时**整条兜一层异常** | `GetNotesList()[musicId]` 是按曲目 ID 索引的，歌不在这台机器的谱面表里时可能返回 null、也可能直接抛越界/KeyNotFound；这是在 Unity 主线程上，抛出去就是整局崩（上游正是在这里崩的）。兜住之后只跳过这一条房间 |
 | 11 | 新增 `LinkRuntime.ConnectList`：**记住真正显示出来的房间顺序**，`RecruitData` getter 按光标取时用它 | 大厅里装不了的歌会被跳过，此时"光标第 n 格"和"原始房间列表第 n 项"不是同一个房间 —— 会变成显示 A 的歌、进去却是 B 的房间 |
 | 12 | 本体 `SocketBase.error` 的噪音降级成 `Warn`，并写明"与本插件无关" | 它本来就是游戏网络层自己抱怨（`send failed null (0)`），以前打成 `Error`，日志里一片红，容易误判成 mod 坏了 |
@@ -380,13 +381,13 @@ bash tests/run_all.sh        # 十步全跑，一分钟左右
 | --- | --- | --- |
 | 编译 | 源码 ↔ 游戏本体 API 是否对得上 | ✅ 通过（`build/InStoreLink.dll`） |
 | `tests/ProtocolTests.cs` | 序列化/解析往返、伪 IP、配置解析（36 项） | ✅ 全绿 |
-| `tests/ClientTests.cs` | **客户端逻辑**（脱离游戏跑）：建流挂起 / 接流成功、超时、CLOSE 取消、待 Accept 队列清理（16 项） | ✅ 全绿 |
+| `tests/ClientTests.cs` | **客户端逻辑**（脱离游戏跑）：建流挂起 / 接流成功、超时、CLOSE 取消、失败条子的保质期、待 Accept 队列清理（19 项） | ✅ 全绿 |
 | `tests/py/test_vectors.py` | 同一批向量 + **用真实抓包日志反验**（17 项；给出 `MAIMAI_LOGS` 时 18 项） | ✅ 全绿（12 种真实报文全部能还原） |
 | `tests/py/test_e2e.py` | 起真的 instorematchd，跑完 开房→列表→建流→传数据→关流→关房（18 项） | ✅ 全绿 |
 | `tests/py/test_edge.py` | **异常流程**：房主先开打 / 目标不在线 / 反复重试 / 挂起超时回收 / 身份校验 / 限速与房间上限（14 项） | ✅ 全绿 |
 | `tests/py/live_smoke.py` | **线上烟测**（不放进 `run_all.sh`，会往公开大厅临时开房）：对着真在跑的大厅把上面那些场景再走一遍，外加"第二个房客""房主中途掉线""房间 TTL vs 续报"（20 项） | ✅ 全绿（打的就是 `isakio.cn`） |
 | `tests/GameCompatProbe.cs` | **游戏兼容性探针**：补丁目标方法是否存在、注入字段类型是否匹配、反射句柄拿不拿得到（60 项） | ✅ 全绿 |
-| `tools/check_patch_params.cs` | **参数名检查**：两个 dll 的补丁（InStoreLink 33 条 + InStoreMatch 8 个补丁方法）的普通参数名逐个和游戏对齐，外加 Prefix/Postfix 标注、`___字段` 是否存在（Harmony 是按名字传参的） | ✅ 全绿 |
+| `tools/check_patch_params.cs` | **参数名检查**：两个 dll 的补丁（InStoreLink 34 条 + InStoreMatch 8 个补丁方法）的普通参数名逐个和游戏对齐，外加 Prefix/Postfix 标注、`___字段` 是否存在（Harmony 是按名字传参的） | ✅ 全绿 |
 | `tools/fingerprint.cs` | **发行版指纹**：`client/` 里那两个 dll 是不是真的由当前源码编出来的（csc 输出不可复现，md5 比不出来） | ✅ 全绿 |
 | `tests/py/test_docs.py` | **文档一致性**：发行 dll 的字节数 / md5、Markdown 相对链接、补丁条数、旧名字残留、`third_party/` 里有没有二进制 | ✅ 全绿 |
 | `tests/run_release_check.sh` | **Release 附件一致性**（要 gh + 联网，所以不在上面那十步里）：GitHub 上最新 Release 挂的两个 dll 和 `client/` 里的实物是否一致 —— 拿 API 的 digest 比，不靠下载（下载链接有 CDN 缓存） | ✅ 全绿 |
@@ -408,8 +409,8 @@ MAIMAI_LOGS=/path/to/logs bash tests/run_all.sh
 真机上要看的日志（进游戏实测已经在 2026-10-05 跑过三轮，见上一节的「当前状态」）：
 
 1. `Mods\` 里删掉 `WorldLink.dll`，放入 `InStoreLink.dll`，重启游戏；
-2. 日志里逐条打 `[InStoreLink]   ✓ 补丁名 → 目标方法`（33 行），然后是
-   `[InStoreLink] 挂钩完成，共 33 条生效`；哪条挂不上会点名 `✗` 并把异常打出来
+2. 日志里逐条打 `[InStoreLink]   ✓ 补丁名 → 目标方法`（34 行），然后是
+   `[InStoreLink] 挂钩完成，共 34 条生效`；哪条挂不上会点名 `✗` 并把异常打出来
    （逐条挂载，一条失败不会连累其余补丁）；
 3. `[InStoreLink] 已连接中继 isakio.cn:20101（本机伪 IP …）`；
 4. 进选曲界面 → 店内マッチング → 用 `fake_player.py` 或朋友开房验证能否看到并进入。
@@ -418,7 +419,7 @@ MAIMAI_LOGS=/path/to/logs bash tests/run_all.sh
 
 ## 十、已知限制
 
-前半截是**和上游一样的设计约束**（不是 bug），后半截是 v0.2 之后还剩的真限制。
+前半截是**和上游一样的设计约束**（不是 bug），后半截是 v0.3 之后还剩的真限制。
 
 - **最多 2 个人**。上游整套类都叫 `Futari*`（ふたり=两人）：party 里只有"自己 + 一个对端"，
   招募数据里房间也只有两格（`UserNames:["我","ＧＵＥＳＴ"]`）。本体的店内マッチング是 4 人房，
@@ -429,7 +430,7 @@ MAIMAI_LOGS=/path/to/logs bash tests/run_all.sh
 - **keychip 每次启动都换**：伪 IP 随之改变。所以同一台机子重启后在大厅里是"新身份"，
   旧房间记录要等 TTL 过期（正常结束时游戏会发 `FinishRecruit`，房间立刻就撤）。
 - **和中继断开就重连**，重连期间游戏那边的连接会卡住（本体不会自动重开 party 连接）。
-- **对端掉线时我们不会给游戏伪造"连接已关闭"**：v0.2 会把服务端那条流清掉、也在
+- **对端掉线时我们不会给游戏伪造"连接已关闭"**：v0.3 会把服务端那条流清掉、也在
   日志里说清楚，但客户端 `Receive` 依旧只会返回 `WouldBlock` —— 真发 EOF（返回 0）
   有可能让本体的读取循环空转，风险比收益大，所以这一步没做，靠本体自己的 party 超时兜底。
 - **假玩家（`tools/fake_player.py`）只能验证到"进房间"**：它把收到的包原样回弹，所以能看到

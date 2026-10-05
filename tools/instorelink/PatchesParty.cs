@@ -327,6 +327,63 @@ namespace InStoreLink
 
         // ------------------------------------------------------------ 选曲界面
 
+        private static MethodInfo _socketError;
+        private static bool _socketErrorWarned;
+
+        /// <summary>
+        /// 加入失败时，走**本体自己的**失败路径。
+        ///
+        /// 为什么不是"给那个 socket 触发 Completed"：`ConnectSocket.Execute_Connect` 只检查
+        /// `_connectDone` 这个布尔（本体的 `ConnectCompletedEvent` 就只是把它置真），**不看
+        /// `SocketError`**；而 `Party.Client.Execute_Connect` 又是先判 `isActive()`（= 状态机
+        /// 到了 Active）再判 `isError()`。所以只要触发 Completed，游戏就认定"连上了"，
+        /// 然后卡在联机选曲那边 —— 比不触发还糟。
+        ///
+        /// 正确做法是调 `SocketBase.error(message, no)`：它会置 `_isError` 并关掉 socket，
+        /// 下一帧 `Party.Client.Execute_Connect` 就会走 `Client.error()` → 进本体的错误状态。
+        ///
+        /// 这个 Prefix 每帧都会被调用（连不上时状态机一直停在 Connect），所以：
+        ///   有失败要报 → 报给本体，并**跳过原方法**（原方法会看 `_connectDone` 进 Active）
+        ///   没有       → 原样放行
+        /// </summary>
+        [HarmonyPrefix]
+        [HarmonyPatch(typeof(PartyLink.ConnectSocket), "Execute_Connect")]
+        public static bool PreConnectSocketExecute(PartyLink.ConnectSocket __instance)
+        {
+            string why = LinkClient.TakeJoinFailure();
+            if (why == null) return true;
+
+            if (_socketError == null)
+            {
+                // error 是 protected（family），只能反射拿
+                _socketError = typeof(PartyLink.SocketBase).GetMethod("error",
+                    BindingFlags.NonPublic | BindingFlags.Instance, null,
+                    new[] { typeof(string), typeof(int) }, null);
+            }
+            if (_socketError == null)
+            {
+                if (!_socketErrorWarned)
+                {
+                    _socketErrorWarned = true;
+                    LinkLog.Error("拿不到 SocketBase.error —— 加入失败时只能退回旧行为"
+                                  + "（界面停在连接中，但至少不会误判成连上）");
+                }
+                return true;                 // 放行原方法：它不会进 Active（_connectDone 一直是假）
+            }
+
+            try
+            {
+                _socketError.Invoke(__instance, new object[] { "InStoreLink：" + why, 0 });
+                LinkLog.Info("已把加入失败交回本体处理：" + why);
+            }
+            catch (Exception ex)
+            {
+                LinkLog.Error("通知本体连接失败时出错：" + ex.Message);
+                return true;
+            }
+            return false;                    // 跳过原方法，别让它把状态推到 Active
+        }
+
         [HarmonyPrefix]
         [HarmonyPatch(typeof(MusicSelectProcess), "OnStart")]
         public static bool PreMusicSelectOnStart(MusicSelectProcess __instance)

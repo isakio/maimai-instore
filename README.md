@@ -73,7 +73,7 @@
 
 ```
 ├── client/                        ← 装客户端要的东西全在这儿
-│   ├── InStoreLink.dll            ← 联机 mod（v0.2，替代上游 WorldLink.dll）
+│   ├── InStoreLink.dll            ← 联机 mod（v0.3，替代上游 WorldLink.dll）
 │   ├── InStoreMatch.dll           ← 让「店内マッチング」那一格画出来（v2.5）
 │   └── install.ps1                ← 一条命令：拷两个 dll + 停用旧的 + 写 InStoreLink.toml
 ├── tools/
@@ -116,7 +116,7 @@
 
 | 文件 | 干什么 | 校验 |
 | --- | --- | --- |
-| [`client/InStoreLink.dll`](client/InStoreLink.dll) | 联机本体：注册中继、开房、把对方的房间喂回游戏 | v0.2，53248 字节 / md5 `2572b4c1afde305e023f064d76c00311` |
+| [`client/InStoreLink.dll`](client/InStoreLink.dll) | 联机本体：注册中继、开房、把对方的房间喂回游戏 | v0.3，54272 字节 / md5 `76456ce0f09f93625176127ef003cdc5` |
 | [`client/InStoreMatch.dll`](client/InStoreMatch.dll) | 让选曲界面画出「店内マッチング」那一格 | v2.5，18432 字节 / md5 `1a94a9b6be9b03bfb274e41b0a8256b3` |
 
 两个文件都在本仓库的 [`client/`](client/) 里（[最新 Release](https://github.com/isakio/maimai-instore/releases/latest) 也附了），不用再去别的地方下。
@@ -167,10 +167,10 @@ powershell -ExecutionPolicy Bypass -File .\client\install.ps1
 **验收**：`MelonLoader\Logs\Latest.log` 里应该有
 
 ```
-[InStoreLink] InStoreLink 0.2.0 已加载（配置 InStoreLink.toml，大厅 http://isakio.cn:20100，详细日志 关）
+[InStoreLink] InStoreLink 0.3.0 已加载（配置 InStoreLink.toml，大厅 http://isakio.cn:20100，详细日志 关）
 [InStoreLink]   ✓ PreCheckAuth → OperationManager.CheckAuth_Proc
-...（一共 33 行“✓ 补丁名 → 目标方法”）
-[InStoreLink] 挂钩完成，共 33 条生效
+...（一共 34 行“✓ 补丁名 → 目标方法”）
+[InStoreLink] 挂钩完成，共 34 条生效
 [InStoreLink] 已连接中继 isakio.cn:20101（本机伪 IP ...）
 [InStoreMatch] v2.5 已加载（...）
 [InStoreMatch] 挂钩成功: reinputConnectCombineData ...（共 7 行“挂钩成功”）
@@ -248,21 +248,27 @@ sudo IMD_ADMIN_TOKEN='你的token' bash instorematchd/install.sh <你的域名�
 
 ## 更新记录
 
-**v0.2（`InStoreLink.dll`，53248 字节 / md5 `2572b4c1afde305e023f064d76c00311`）**
+**v0.3（`InStoreLink.dll`，54272 字节 / md5 `76456ce0f09f93625176127ef003cdc5`）**
 
 这一版专门修**"没按正常剧本走"的那些情况** —— 正常流程本来就能跑通，但这些岔路以前全是
 "只写一行日志就完事"，玩家侧表现为一直转圈或者莫名其妙掉线：
 
 - 房主**没等人就开打**（或者直接退了），已经点了"加入"的人不会再卡在连接中：
-  服务端会把挂起的建流取消并通知两边，客户端最多 8 秒也会自己收尾
+  服务端会把挂起的建流取消并通知两边；客户端最多 8 秒收尾，并且是走**本体自己的
+  "连接失败"流程**（`SocketBase.error()`），不是自己造一个假状态
 - 点进一个**房主已经不在线**的房间 → 立刻失败，不再干等
 - **反复点"加入"不会再被踢下线**（以前挂起超过 10 条就把整个人断开重连）
 - 房主**开好房等超过 30 秒**，房间不会再从大厅里消失（客户端每 10 秒续报一次）
 - 大厅接口加了身份校验（房间的伪 IP 必须就是上报 keychip 算出来的那个）、
   开房限速与房间总数上限
 
+> 这条一开始写错过：最初是给那个 socket 触发"完成事件"并塞一个错误码，后来反汇编本体
+> 才发现 `ConnectSocket.Execute_Connect` **只看"完成事件来过"这个布尔、根本不看错误码**，
+> 而 `Party.Client` 又是先判 `isActive()` 再判 `isError()` —— 结果是游戏会**误以为连上了**、
+> 然后卡在联机选曲那边。现在改成调 `SocketBase.error()`，让游戏按它自己的失败流程收尾。
+
 服务端改动是**向后兼容**的：老版本客户端连新服务端照常能玩，只是享受不到上面这些兜底。
-两边都升级到 v0.2 体验最好。逐条验证在 `tests/py/test_edge.py`。
+两边都升级到 v0.3 体验最好。逐条验证在 `tests/py/test_edge.py` 与 `tests/ClientTests.cs`。
 
 ## 已知问题
 

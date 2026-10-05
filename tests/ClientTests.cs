@@ -73,6 +73,7 @@ public static class ClientTests
         TestAcceptThenLateTimeout();
         TestTimeoutFires();
         TestCloseCancelsPending();
+        TestJoinFailureWindow();
         TestCloseDropsQueuedAccept();
 
         Console.WriteLine();
@@ -104,7 +105,7 @@ public static class ClientTests
 
     private static void TestAcceptThenLateTimeout()
     {
-        Console.WriteLine("3) 接流成功后，超时器不许再触发第二次");
+        Console.WriteLine("3) 接流成功：完成事件只来一次，且不留失败条子");
         LinkClient c = NewClient("W9CLIENT0002");
         int sid = 222, port = 60002;
         Probe p = new Probe();
@@ -112,22 +113,24 @@ public static class ClientTests
         c.CompleteAccept(sid + port);
         Thread.Sleep(900);                       // 远超上面设的 300ms
         Check(p.Calls == 1, "等了 3 倍超时时间，完成事件仍然只触发一次");
+        Check(LinkClient.TakeJoinFailure() == null, "成功路径不会留下失败条子");
     }
 
     private static void TestTimeoutFires()
     {
-        Console.WriteLine("4) 一直没人接流");
+        Console.WriteLine("4) 一直没人接流：交给游戏自己的错误路径，而不是假装连上");
         LinkClient c = NewClient("W9CLIENT0003");
         int sid = 333, port = 60003;
         Probe p = new Probe();
         c.AddAcceptPending(sid + port, p.Args);
         Check(p.Calls == 0, "刚挂起时还没完成");
         Thread.Sleep(1200);
-        Check(p.Calls == 1, "超时后完成事件触发（游戏因此不会一直卡在连接中）");
-        Check(p.Error == SocketError.TimedOut, "错误码是 TimedOut");
+        // 关键：**不能**触发 Completed —— 本体只看"完成事件来过"就当连上了
+        Check(p.Calls == 0, "超时不会触发 Completed（否则游戏会误判成连上）");
         Check(!c.AcceptPending.ContainsKey(sid + port), "挂起记录已摘掉");
-        Thread.Sleep(300);
-        Check(p.Calls == 1, "超时只触发一次");
+        string why = LinkClient.TakeJoinFailure();
+        Check(why != null && why.Contains("超时"), "留下了失败条子交给主线程：" + why);
+        Check(LinkClient.TakeJoinFailure() == null, "条子取一次就没了（不会重复报）");
     }
 
     private static void TestCloseCancelsPending()
@@ -144,10 +147,20 @@ public static class ClientTests
             Cmd = (int)LinkCmd.CtlTcpClose, Proto = LinkProto.Tcp, Sid = sid, DPort = port
         });
 
-        Check(p.Calls == 1, "完成事件立刻触发（不用干等到超时）");
-        Check(p.Error == SocketError.ConnectionRefused, "错误码是 ConnectionRefused");
+        Check(p.Calls == 0, "同样不触发 Completed（不假装连上）");
         Check(!c.AcceptPending.ContainsKey(sid + port), "挂起记录已摘掉");
+        string why = LinkClient.TakeJoinFailure();
+        Check(why != null && why.Contains("取消"), "立刻留下失败条子（不用干等到超时）：" + why);
         LinkClient.AcceptTimeoutMs = 300;
+    }
+
+    private static void TestJoinFailureWindow()
+    {
+        Console.WriteLine("7) 失败条子有保质期（避免记到下一次连接头上）");
+        Check(LinkClient.JoinFailureWindowMs == 3000, "保质期 3000ms");
+        LinkClient.ReportJoinFailure("很久以前的失败");
+        Thread.Sleep(3200);
+        Check(LinkClient.TakeJoinFailure() == null, "超过保质期就丢掉");
     }
 
     private static void TestCloseDropsQueuedAccept()

@@ -123,6 +123,40 @@ namespace InStoreLink
 
         public string ErrorMsg { get; private set; }
 
+        /// <summary>
+        /// "这次加入没成功"的交接位：客户端线程写，游戏主线程取（见 PatchesParty 里的
+        /// ConnectSocket.Execute_Connect 补丁）。超过这个时间的条子会被丢掉，
+        /// 免得张冠李戴到下一次连接上。
+        /// </summary>
+        public const int JoinFailureWindowMs = 3000;
+        private static string _joinFailure;
+        private static int _joinFailureAt;
+
+        /// <summary>
+        /// 报告"这次加入失败"（建流超时 / 对方取消了）。
+        ///
+        /// 注意**不能**直接给那个 SocketAsyncEventArgs 触发 Completed：本体只把
+        /// "完成事件来过"当成"连上了" —— `ConnectSocket.Execute_Connect` 只检查
+        /// `_connectDone` 这个布尔，压根不看 `SocketError`，触发之后游戏会进 Active、
+        /// 然后卡在联机选曲那边（比不触发还糟）。所以这里只留个条子，由主线程的补丁
+        /// 去调本体自己的 `SocketBase.error()`，让游戏按"连接失败"的原有流程收尾。
+        /// </summary>
+        public static void ReportJoinFailure(string message)
+        {
+            _joinFailure = message;
+            _joinFailureAt = Environment.TickCount;
+        }
+
+        /// <summary>主线程取走失败原因；没有（或者已经太旧）返回 null。</summary>
+        public static string TakeJoinFailure()
+        {
+            string msg = _joinFailure;
+            if (msg == null) return null;
+            _joinFailure = null;
+            if (unchecked(Environment.TickCount - _joinFailureAt) > JoinFailureWindowMs) return null;
+            return msg;
+        }
+
         /// <summary>最近 20 次心跳的平均往返（ms），0 表示还没测出来。</summary>
         public long DelayAvg
         {
@@ -376,9 +410,8 @@ namespace InStoreLink
             AcceptPending[key] = pending;
             pending.Timeout = new Timer(delegate(object state)
             {
-                FailAccept(key, SocketError.TimedOut,
-                           "建流超时：" + AcceptTimeoutMs + "ms 内对方没有接流"
-                           + "（房间可能已经关了，或者对方直接开打了）");
+                FailAccept(key, "建流超时：" + AcceptTimeoutMs + "ms 内对方没有接流"
+                                + "（房间可能已经关了，或者对方直接开打了）");
             }, null, AcceptTimeoutMs, Timeout.Infinite);
         }
 
@@ -397,16 +430,18 @@ namespace InStoreLink
         }
 
         /// <summary>
-        /// 这次建流失败了（超时 / 对方取消 / 目标不在线）：让游戏的连接流程走失败分支，
-        /// 而不是永远卡在"连接中"。
+        /// 这次建流失败了（超时 / 对方取消）。
+        ///
+        /// 交给主线程去走本体自己的错误路径（见 LinkRuntime.ReportJoinFailure 的注释：
+        /// 直接触发 Completed 会让游戏以为连上了）。
         /// </summary>
-        public void FailAccept(int key, SocketError error, string why)
+        public void FailAccept(int key, string why)
         {
             PendingAccept pending;
             if (!AcceptPending.TryRemove(key, out pending) || pending == null) return;
             StopTimer(pending);
             LinkLog.Warn(why);
-            LinkSocket.InvokeCompleted(pending.Args, error);
+            ReportJoinFailure(why);
         }
 
         /// <summary>放弃一次挂起（游戏自己把 socket 关了、或我们退出时）。</summary>
@@ -435,8 +470,7 @@ namespace InStoreLink
             //    房主没等人就开打了，服务端把挂起的建流取消掉）。
             if (AcceptPending.ContainsKey(key))
             {
-                FailAccept(key, SocketError.ConnectionRefused,
-                           "对方取消了这次建流（sid " + msg.Sid.Value + "），放弃连接");
+                FailAccept(key, "对方取消了这次建流（sid " + msg.Sid.Value + "）");
                 return;
             }
 

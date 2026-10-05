@@ -14,7 +14,7 @@ using System.Reflection;
 using HarmonyLib;
 using MelonLoader;
 
-[assembly: MelonInfo(typeof(InStoreLink.LinkMod), "InStoreLink", "0.2.0", "isakio")]
+[assembly: MelonInfo(typeof(InStoreLink.LinkMod), "InStoreLink", "0.3.0", "isakio")]
 [assembly: MelonGame("sega-interactive", "Sinmai")]
 // 和上游一样：不让 MelonLoader 自动扫特性去挂补丁，全部由 OnInitializeMelon 手动挂，
 // 这样每条补丁的成败都在我们自己的日志里（也避免同一条被挂两遍）。
@@ -36,7 +36,7 @@ namespace InStoreLink
             LinkRuntime.Config = LinkConfig.Load(configPath, out note);
             LinkLog.Verbose = LinkRuntime.Config.Debug;
 
-            LinkLog.Msg("InStoreLink 0.2.0 已加载（配置 " + configPath + "，大厅 " + LinkRuntime.Config.LobbyUrl +
+            LinkLog.Msg("InStoreLink 0.3.0 已加载（配置 " + configPath + "，大厅 " + LinkRuntime.Config.LobbyUrl +
                         "，详细日志 " + (LinkRuntime.Config.Debug ? "开" : "关") + "）");
             if (!string.IsNullOrEmpty(note)) LinkLog.Warn(note);
 

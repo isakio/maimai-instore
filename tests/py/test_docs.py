@@ -68,7 +68,9 @@ def main():
         check(True, "client/%s：%d 字节 / %s" % (name, len(blob), dlls[name][1]))
 
     hex_re = re.compile(r"\b[0-9a-fA-F]{32}\b")
-    size_re = re.compile(r"(?:必须输出\s*)?(\d{5,7})\s*字节|必须输出\s*(\d{5,7})")
+    # 第二种写法的 `\b` 不能省：md5 以 5~7 位数字开头时（例如 76456ce0…），
+    # 没有词边界的话会把 "76456" 当成字节数，误报「文档写着 76456 字节」。
+    size_re = re.compile(r"(?:必须输出\s*)?(\d{5,7})\s*字节|必须输出\s*(\d{5,7})\b")
     bad = []
     for path in md_files():
         if path == HISTORY:
