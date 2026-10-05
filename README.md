@@ -4,6 +4,13 @@
 [![License: MIT](https://img.shields.io/github/license/isakio/maimai-instore)](LICENSE)
 [![公共大厅](https://img.shields.io/badge/%E5%85%AC%E5%85%B1%E5%A4%A7%E5%8E%85-isakio.cn%3A20100-blue)](http://isakio.cn:20100)
 
+> ⚠️ **这是旧方案的分支**：客户端直接用上游 NyanLink 的 `WorldLink.dll`。
+> 主分支 [`main`](https://github.com/isakio/maimai-instore/tree/main) 已经换成本仓库自己重写的
+> [`InStoreLink`](https://github.com/isakio/maimai-instore/tree/main/tools/instorelink)（协议兼容、
+> 不再依赖上游二进制），**建议去用主分支**。
+> 本分支对应的发行版是 [v2.5](https://github.com/isakio/maimai-instore/releases/tag/v2.5)，
+> 主分支对应的是 [v3.0](https://github.com/isakio/maimai-instore/releases/tag/v3.0)。
+
 [NyanLink](https://github.com/MuNET-OSS/NyanLink)（上游是 [MewoLab/worldlinkd](https://github.com/MewoLab/worldlinkd)）给
 maimai DX 提供了 C2C 联机。本仓库是给它的**配套工具**：一个客户端插件，让选曲界面
 底部的「店内マッチング」直接可用；另外附一份自研的大厅 + 中继服务端（协议兼容，零依赖）。
@@ -22,7 +29,7 @@ maimai DX 提供了 C2C 联机。本仓库是给它的**配套工具**：一个�
 > License 都是 MIT（沿革：`MewoLab/worldlinkd` → `Japerz12138/worldlinkd` → `MuNET-OSS/NyanLink`）。
 
 **只想玩？** 我们有一台已经跑着的大厅 `http://isakio.cn:20100` —— 去
-[**最新 Release**](https://github.com/isakio/maimai-instore/releases/latest) 下载
+[**v2.5 Release**](https://github.com/isakio/maimai-instore/releases/tag/v2.5) 下载
 `InStoreMatch.dll`，照着下面的「方式 A」做就行。想自己开一台，看「方式 B」。
 
 ## 它是怎么工作的
@@ -85,7 +92,7 @@ maimai DX 提供了 C2C 联机。本仓库是给它的**配套工具**：一个�
 | `WorldLink.dll` | 本仓库 [`client/WorldLink.dll`](client/WorldLink.dll)（NyanLink 官方构建，原样收录：50176 字节 / md5 `9dfa62d5cba41deac0c2c74334ef8371`；出处与许可见 [`third_party/NyanLink/`](third_party/NyanLink/)） |
 | `InStoreMatch.dll` | 本仓库 [`client/InStoreMatch.dll`](client/InStoreMatch.dll)（v2.5，18432 字节 / md5 `1a94a9b6be9b03bfb274e41b0a8256b3`） |
 
-两个文件都在本仓库的 [`client/`](client/) 里（[最新 Release](https://github.com/isakio/maimai-instore/releases/latest) 也附了），不用再去别的地方下。
+两个文件都在本仓库的 [`client/`](client/) 里（[v2.5 Release](https://github.com/isakio/maimai-instore/releases/tag/v2.5) 也附了），不用再去别的地方下。
 
 **2. 在游戏根目录（`Sinmai.exe` 那一层）放 `WorldLink.toml`**
 
@@ -121,7 +128,7 @@ powershell -ExecutionPolicy Bypass -File .\client\install-instorematch.ps1
 `http://isakio.cn:20100` —— **不自己搭服务器的话，这个参数根本不用管**。
 只有你自己搭了大厅（见「方式 B」）时，才在命令最后多给一个参数改掉它。
 
-不想 clone 的话：从 [Release](https://github.com/isakio/maimai-instore/releases/latest)
+不想 clone 的话：从 [v2.5 Release](https://github.com/isakio/maimai-instore/releases/tag/v2.5)
 把两个 dll 下下来手动拷进 `Mods\`，再自己写那个 `WorldLink.toml` 也一样。
 
 **验收**：`MelonLoader\Logs\Latest.log` 里应该有
