@@ -73,7 +73,7 @@
 
 ```
 ├── client/                        ← 装客户端要的东西全在这儿
-│   ├── InStoreLink.dll            ← 联机 mod（v0.1，替代上游 WorldLink.dll）
+│   ├── InStoreLink.dll            ← 联机 mod（v0.2，替代上游 WorldLink.dll）
 │   ├── InStoreMatch.dll           ← 让「店内マッチング」那一格画出来（v2.5）
 │   └── install.ps1                ← 一条命令：拷两个 dll + 停用旧的 + 写 InStoreLink.toml
 ├── tools/
@@ -116,7 +116,7 @@
 
 | 文件 | 干什么 | 校验 |
 | --- | --- | --- |
-| [`client/InStoreLink.dll`](client/InStoreLink.dll) | 联机本体：注册中继、开房、把对方的房间喂回游戏 | v0.1，49664 字节 / md5 `076c0179fdbc23c41bf3a690543dea9a` |
+| [`client/InStoreLink.dll`](client/InStoreLink.dll) | 联机本体：注册中继、开房、把对方的房间喂回游戏 | v0.2，52736 字节 / md5 `c048fc095d87873ab01023a85e4a9423` |
 | [`client/InStoreMatch.dll`](client/InStoreMatch.dll) | 让选曲界面画出「店内マッチング」那一格 | v2.5，18432 字节 / md5 `1a94a9b6be9b03bfb274e41b0a8256b3` |
 
 两个文件都在本仓库的 [`client/`](client/) 里（[最新 Release](https://github.com/isakio/maimai-instore/releases/latest) 也附了），不用再去别的地方下。
@@ -167,7 +167,7 @@ powershell -ExecutionPolicy Bypass -File .\client\install.ps1
 **验收**：`MelonLoader\Logs\Latest.log` 里应该有
 
 ```
-[InStoreLink] InStoreLink 0.1.0 已加载（配置 InStoreLink.toml，大厅 http://isakio.cn:20100，详细日志 关）
+[InStoreLink] InStoreLink 0.2.0 已加载（配置 InStoreLink.toml，大厅 http://isakio.cn:20100，详细日志 关）
 [InStoreLink]   ✓ PreCheckAuth → OperationManager.CheckAuth_Proc
 ...（一共 33 行“✓ 补丁名 → 目标方法”）
 [InStoreLink] 挂钩完成，共 33 条生效
@@ -246,6 +246,24 @@ sudo IMD_ADMIN_TOKEN='你的token' bash instorematchd/install.sh <你的域名�
 一份可以直接转发给搭子的简版说明在
 [`docs/给朋友看-安装步骤.md`](docs/给朋友看-安装步骤.md)。
 
+## 更新记录
+
+**v0.2（`InStoreLink.dll`，52736 字节 / md5 `c048fc095d87873ab01023a85e4a9423`）**
+
+这一版专门修**"没按正常剧本走"的那些情况** —— 正常流程本来就能跑通，但这些岔路以前全是
+"只写一行日志就完事"，玩家侧表现为一直转圈或者莫名其妙掉线：
+
+- 房主**没等人就开打**（或者直接退了），已经点了"加入"的人不会再卡在连接中：
+  服务端会把挂起的建流取消并通知两边，客户端最多 8 秒也会自己收尾
+- 点进一个**房主已经不在线**的房间 → 立刻失败，不再干等
+- **反复点"加入"不会再被踢下线**（以前挂起超过 10 条就把整个人断开重连）
+- 房主**开好房等超过 30 秒**，房间不会再从大厅里消失（客户端每 10 秒续报一次）
+- 大厅接口加了身份校验（房间的伪 IP 必须就是上报 keychip 算出来的那个）、
+  开房限速与房间总数上限
+
+服务端改动是**向后兼容**的：老版本客户端连新服务端照常能玩，只是享受不到上面这些兜底。
+两边都升级到 v0.2 体验最好。逐条验证在 `tests/py/test_edge.py`。
+
 ## 已知问题
 
 - `http://isakio.cn:20100` 是**公开大厅**：知道地址的人都能连上来，看板也是公开的 ——
@@ -262,6 +280,7 @@ sudo IMD_ADMIN_TOKEN='你的token' bash instorematchd/install.sh <你的域名�
   连不上。想真的 4 人：回到同一局域网，用游戏本体的店内匹配。
 - 大厅没有配对机制：所有房间对所有人生效，加入是"先到先得"，一个房间满 2 人就不再收。
   多人同时挂着招募时，列表会混在一起（客户端是按"第几条"对应房间的）。
+  进不去的那一方会在 8 秒内失败并退回选曲界面，不会卡在连接中。
 
 ## 鸣谢
 

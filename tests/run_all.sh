@@ -3,15 +3,16 @@
 #
 #   bash tests/run_all.sh [游戏目录]
 #
-# 八步：
+# 九步：
 #   1. 编译 InStoreLink.dll（能编过 = 源码和游戏本体的 API 对得上）
 #   2. C# 协议单测（序列化 / 解析 / 伪 IP / 配置）
 #   3. Python 协议向量测试（含真实抓包日志的还原）
 #   4. Python 端到端测试（起一个真的 instorematchd，跑完开房→建流→传数据→关房）
-#   5. 游戏兼容性探针（补丁目标 / 注入字段）
-#   6. 补丁参数名检查（Harmony 按名字传参）
-#   7. 发行版指纹（client/ 里那两个 dll 是不是真的由当前源码编的）
-#   8. 文档一致性（md5 / 字节数 / 补丁条数 / 链接 / 旧名字）
+#   5. Python 异常流程测试（房主先开打 / 目标不在线 / 反复重试 / 超时回收 / 限速）
+#   6. 游戏兼容性探针（补丁目标 / 注入字段）
+#   7. 补丁参数名检查（Harmony 按名字传参）
+#   8. 发行版指纹（client/ 里那两个 dll 是不是真的由当前源码编的）
+#   9. 文档一致性（md5 / 字节数 / 补丁条数 / 链接 / 旧名字）
 
 set -uo pipefail
 
@@ -56,7 +57,11 @@ echo "########## 4. Python 端到端测试"
 python3 "$ROOT/tests/py/test_e2e.py" || FAILED=1
 
 echo
-echo "########## 5. 游戏兼容性探针（补丁目标 / 注入字段）"
+echo "########## 5. Python 异常流程测试（房主先开打 / 目标不在线 / 反复重试 / 超时回收 / 限速）"
+python3 "$ROOT/tests/py/test_edge.py" || FAILED=1
+
+echo
+echo "########## 6. 游戏兼容性探针（补丁目标 / 注入字段）"
 if [ -d "$GAME/Sinmai_Data/Managed" ]; then
     bash "$ROOT/tests/run_probe.sh" "$GAME" || FAILED=1
 else
@@ -64,7 +69,7 @@ else
 fi
 
 echo
-echo "########## 6. 补丁参数名检查（Harmony 按名字传参）"
+echo "########## 7. 补丁参数名检查（Harmony 按名字传参）"
 if [ -d "$GAME/Sinmai_Data/Managed" ]; then
     bash "$ROOT/tests/run_param_check.sh" "$GAME" || FAILED=1
 else
@@ -72,11 +77,11 @@ else
 fi
 
 echo
-echo "########## 7. 发行版指纹（client/ 里的 dll vs 当前源码）"
+echo "########## 8. 发行版指纹（client/ 里的 dll vs 当前源码）"
 bash "$ROOT/tests/run_fingerprint.sh" "$GAME" || FAILED=1
 
 echo
-echo "########## 8. 文档一致性（md5 / 字节数 / 补丁条数 / 链接 / 旧名字）"
+echo "########## 9. 文档一致性（md5 / 字节数 / 补丁条数 / 链接 / 旧名字）"
 python3 "$ROOT/tests/py/test_docs.py" || FAILED=1
 
 echo

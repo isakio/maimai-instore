@@ -9,6 +9,7 @@
 // 上游 https://github.com/MuNET-OSS/NyanLink （MIT），本文件是它的等价重写。
 
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Reflection;
 using DB;
@@ -35,8 +36,18 @@ namespace InStoreLink
         private static MethodInfo _recvFinishRecruit;
         private static Client _gameClient;
         private static bool _reflectionWarned;
+        private const float RefreshSeconds = 10f;   // 多久替"我的房间"续一次寿命（大厅 TTL 30s）
+        /// <summary>同一个房间最多续报这么久；超过就停手，让大厅的 TTL 收掉它。</summary>
+        private const float RefreshMaxSeconds = 600f;
         private static float _nextReconcile;
+        private static float _nextRefresh;
+        private static float _refreshSince = -1f;
+        private static string _refreshKey;
+        private static bool _refreshGaveUp;
         private static readonly Dictionary<string, float> _deliveredAt = new Dictionary<string, float>();
+        /// <summary>被我们拒掉的房间（歌没装），别再每 2 秒重喂一遍。</summary>
+        private static readonly ConcurrentDictionary<string, float> _rejected =
+            new ConcurrentDictionary<string, float>();
 
         // ------------------------------------------------------------ 招募列表
 
@@ -91,8 +102,22 @@ namespace InStoreLink
             Dictionary<string, RecruitInfo> want = LinkRuntime.LastRecruits;
             if (want == null) return;
 
+            // 大厅那边的房间只有 30 秒 TTL，而本体只在"开始招募"那一下发一次 StartRecruit
+            // （实测 5 分钟里总共 6 次，不是周期广播）—— 不续报的话，开好房干等半分钟，
+            // 大厅里那条房间就悄悄没了。主线程这边顺手隔 10 秒重报一次。
+            if (UnityEngine.Time.time >= _nextRefresh)
+            {
+                _nextRefresh = UnityEngine.Time.time + RefreshSeconds;
+                try { RefreshMyRecruit(); }
+                catch (Exception ex) { LinkLog.Debug("房间续报出错：" + ex.Message); }
+            }
+
             List<RecruitInfo> have = manager.GetRecruitListWithoutMe();
             if (have == null) have = new List<RecruitInfo>();
+
+            // 大厅里已经没有的房间，把它留下的两本账一起清掉（以前 _deliveredAt 只在一半
+            // 分支里清，被拒的房间那条记录就永远留在字典里了）
+            PruneBookkeeping(want);
 
             // 1) 大厅里有、游戏里没有 → 补进去
             foreach (KeyValuePair<string, RecruitInfo> kv in want)
@@ -102,6 +127,9 @@ namespace InStoreLink
                 // 自己的房间不用喂回自己
                 if (IsMyOwnRoom(room)) continue;
                 if (ContainsRoom(have, room)) continue;
+                // 刚才已经拒过的（歌没装）就别再喂了：喂进去也只会被 PreRecvStartRecruit
+                // 弹回来，然后每 2 秒重来一次，白刷日志
+                if (_rejected.ContainsKey(kv.Key)) continue;
 
                 float last;
                 if (_deliveredAt.TryGetValue(kv.Key, out last) &&
@@ -138,6 +166,89 @@ namespace InStoreLink
                 catch (Exception ex)
                 {
                     LinkLog.Error("去掉房间失败 " + id + "：" + ex.Message);
+                }
+            }
+        }
+
+        /// <summary>
+        /// 房主还在等的时候，隔 RefreshSeconds 秒把"我的房间"往大厅重报一次。
+        ///
+        /// 为什么需要：大厅的房间是 30 秒 TTL，而本体只在开始招募那一下发一次
+        /// StartRecruit。不续报的话，开好房干等 30 秒，大厅里那条房间就没了 ——
+        /// 后来的人（以及每 10 秒轮询一次的自己）都看不到了。
+        /// 读本体状态必须在主线程，所以这一步挂在 ReconcileRecruits 里，不另起线程。
+        /// </summary>
+        private static void RefreshMyRecruit()
+        {
+            IManager manager = LinkRuntime.PartyMan;
+            LinkClient client = LinkRuntime.Client;
+            if (manager == null || client == null || LinkRuntime.Config == null) return;
+
+            List<RecruitInfo> all = manager.GetRecruitList();     // 这一份是**含自己**的
+            if (all == null || all.Count == 0) return;
+            RecruitInfo mine = null;
+            foreach (RecruitInfo r in all)
+            {
+                if (r != null && IsMyOwnRoom(r)) { mine = r; break; }
+            }
+            if (mine == null) return;                             // 我没在招募，没什么可续的
+
+            // 保险：本体什么时候把"我的房间"从列表里去掉，我们没法 100% 确定。
+            // 万一某条路径不发 FinishRecruit，续报就会让一条已经没用的房间永远挂在
+            // 大厅里 —— 所以给一个上限，到点就停手，交回给 TTL。
+            string key = LinkRuntime.Identity(mine);
+            if (_refreshKey != key)
+            {
+                _refreshKey = key;                                // 换了房间，重新计时
+                _refreshSince = UnityEngine.Time.time;
+                _refreshGaveUp = false;
+            }
+            if (UnityEngine.Time.time - _refreshSince > RefreshMaxSeconds)
+            {
+                if (!_refreshGaveUp)
+                {
+                    _refreshGaveUp = true;
+                    LinkLog.Warn("这个房间已经续报超过 " + (int)RefreshMaxSeconds
+                                 + " 秒，停止续报，让大厅自己超时收回（防幽灵房间）");
+                }
+                return;
+            }
+
+            RecruitRecordOut record = new RecruitRecordOut();
+            record.Keychip = client.Keychip;
+            record.RecruitInfo = mine;
+            string url = LinkLobby.Combine(LinkRuntime.Config.LobbyUrl, "/recruit/start");
+            LinkLobby.PostAsync(url, JsonUtility.ToJson(record), delegate(string body, Exception err)
+            {
+                if (err != null) LinkLog.Debug("房间续报失败：" + err.Message);
+            });
+            LinkLog.Debug("房间续报（刷新大厅里的房间寿命）");
+        }
+
+        /// <summary>大厅里已经没有的房间，把它在 _deliveredAt / _rejected 里的记录一并清掉。</summary>
+        private static void PruneBookkeeping(Dictionary<string, RecruitInfo> want)
+        {
+            if (_deliveredAt.Count > 0)
+            {
+                List<string> gone = null;
+                foreach (string key in _deliveredAt.Keys)
+                {
+                    if (want.ContainsKey(key)) continue;
+                    if (gone == null) gone = new List<string>();
+                    gone.Add(key);
+                }
+                if (gone != null)
+                {
+                    foreach (string key in gone) _deliveredAt.Remove(key);
+                }
+            }
+
+            foreach (string key in new List<string>(_rejected.Keys))
+            {
+                if (!want.ContainsKey(key))
+                {
+                    float ignored;
+                    _rejected.TryRemove(key, out ignored);
                 }
             }
         }
@@ -202,6 +313,9 @@ namespace InStoreLink
             // 歌没装的话，本体在后面的流程里会崩，这里直接拒掉并提示
             if (Singleton<DataManager>.Instance.GetMusic(info.MusicID) == null)
             {
+                // 记一笔：大厅那边这条房间还在的话，对账每 2 秒会再喂一次 ——
+                // 不记住就是无限重试 + 无限刷日志。房间从大厅消失时会自动清掉。
+                _rejected[LinkRuntime.Identity(info)] = UnityEngine.Time.time;
                 LinkLog.Error("对方选的歌（ID " + info.MusicID + "）你没装，这条招募被忽略。");
                 if (info.MechaInfo != null && info.MechaInfo.UserNames != null)
                     LinkLog.Error("要和 " + string.Join(" / ", info.MechaInfo.UserNames) + " 联机，" +

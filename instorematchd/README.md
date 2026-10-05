@@ -22,6 +22,15 @@
 - **网页看板（`http://<服务器>:20100/`）**：实时在线玩家、房间列表、事件流水、累计统计
 - **`/api/status`**：看板用的 JSON，排查问题时直接 curl 它
 
+异常流程也做了兜底（正常流程走不到，但玩家天天会碰到）：
+
+- 房主没等人就开打 / 退出 → 挂着"加入"的人会被立刻通知失败，不会卡在连接中
+- 点进一个房主已经不在线的房间、或者对端一直不接受 → 发起方收到 `CTL_TCP_CLOSE`
+- 挂起建流有超时回收，反复点"加入"不会被踢下线
+- `/recruit/start` 校验 `Keychip` 与房间伪 IP 一致，另有开房限速与房间总数上限
+
+这些逐条验证在 [`tests/py/test_edge.py`](../tests/py/test_edge.py)。
+
 ## 部署（推荐：一键脚本，systemd）
 
 需要 Python **3.10+**（代码里用了 `str | None` 这类语法），不需要 pip / 数据库。
@@ -109,6 +118,8 @@ sudo systemctl restart instorematchd        # 重启（改完参数后，现在�
 | `--host-override` | 空 | `/info` 返回的中继主机名。**走反代或域名访问时必须填**，否则客户端会拿到 127.0.0.1 |
 | `--recruit-ttl` | `30` | 房间多久没刷新就消失（秒） |
 | `--heartbeat-timeout` | `30` | 多久没心跳就断开（秒） |
+| `--pending-timeout` | `10` | "房客点了加入、房主一直没接流"的挂起请求多久回收（秒）。到点会给两边各发一条 `CTL_TCP_CLOSE`，让房客的连接立刻失败，而不是一直转圈 |
+| `--max-rooms` | `200` | 大厅同时在册的房间上限 |
 | `--log-level` | `INFO` | `DEBUG` 会打印每一条协议消息，排查时很有用 |
 | `--admin-token` | 空 | 管理员视图（`/admin`、完整版 `/api/status`、`/debug`）的 token。也可以用环境变量 `IMD_ADMIN_TOKEN`；不设就不开放 |
 

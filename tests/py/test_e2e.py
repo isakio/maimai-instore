@@ -179,10 +179,13 @@ def run_checks():
     status, body = http("GET", "/online")
     check(json.loads(body)["activeRecruits"] == 0, "房间数归零")
 
-    print("8) 传错房间的报文不应打崩服务端")
+    print("8) 目标不在线：回 CLOSE（而不是让人干等），且不应打崩服务端")
     b.send("这不是一条合法消息")
     b.send(Msg(DATA_SEND, proto=PROTO_TCP, sid=1, src=guest_stub, sport=1,
                dst=stub_u32("W0000000000"), dport=1, data=payload))
+    got = b.recv()
+    check(got.cmd == CTL_TCP_CLOSE and got.sid == 1,
+          "目标不在线时服务端主动回 CTL_TCP_CLOSE", got.readable())
     b.send(Msg(CTL_HEARTBEAT))
     check(b.recv().cmd == CTL_HEARTBEAT, "发完垃圾消息后连接仍然可用")
 

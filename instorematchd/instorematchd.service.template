@@ -22,7 +22,9 @@ ExecStart=/usr/bin/python3 /opt/instorematchd/instorematchd.py \
     --lobby-port __LOBBY_PORT__ \
     --relay-port __RELAY_PORT__ \
     --recruit-ttl 30 \
-    --heartbeat-timeout 30
+    --heartbeat-timeout 30 \
+    --pending-timeout 10 \
+    --max-rooms 200
 
 Restart=on-failure
 RestartSec=5

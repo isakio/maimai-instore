@@ -7,7 +7,7 @@
 // 三个队列的 key 约定（跟上游一致，别改，否则两边对不上）：
 //   TcpRecvQ[流ID + 本地端口]   收到的流数据
 //   AcceptQ[本地端口]           收到的建流请求
-//   AcceptCallbacks[流ID + 本地端口]  主动建流后等对端接受的回调
+//   AcceptPending[流ID + 本地端口]    主动建流后等对端接受的挂起记录（带超时）
 //
 // 上游 https://github.com/MuNET-OSS/NyanLink （MIT），本文件是它的等价重写。
 
@@ -114,11 +114,8 @@ namespace InStoreLink
 
             int key = _streamId + _bindPort;
             _client.TcpRecvQ[key] = new ConcurrentQueue<LinkMsg>();
-            _client.AcceptCallbacks[key] = delegate(LinkMsg msg)
-            {
-                LinkLog.Info("建流已被对方接受");
-                InvokeCompleted(e);
-            };
+            // 挂起 + 超时：对方一直不接流的话，8 秒后这里会走失败分支（以前是永远等）
+            _client.AddAcceptPending(key, e);
 
             _client.Send(new LinkMsg
             {
@@ -137,8 +134,10 @@ namespace InStoreLink
         /// <summary>
         /// 通知 SocketAsyncEventArgs 的 Completed 事件（上游也是这么反射调的）。
         /// 游戏本体的 ConnectAsync 是异步 API，不触发 Completed 的话它会一直等。
+        /// error 传非 Success 时，游戏会把这次连接当失败处理 —— 这正是我们想要的
+        /// "别卡在连接中"。
         /// </summary>
-        private static void InvokeCompleted(SocketAsyncEventArgs e)
+        internal static void InvokeCompleted(SocketAsyncEventArgs e, SocketError error)
         {
             if (CompletedField == null || e == null) return;
             MulticastDelegate handlers = CompletedField.GetValue(e) as MulticastDelegate;
@@ -149,7 +148,7 @@ namespace InStoreLink
                 try
                 {
                     SocketAsyncEventArgs args = new SocketAsyncEventArgs();
-                    args.SocketError = SocketError.Success;
+                    args.SocketError = error;
                     handler.DynamicInvoke(e, args);
                 }
                 catch (Exception ex)
@@ -262,8 +261,7 @@ namespace InStoreLink
                     }
                     ConcurrentQueue<LinkMsg> ignored;
                     _client.TcpRecvQ.TryRemove(_streamId + _bindPort, out ignored);
-                    Action<LinkMsg> ignoredCb;
-                    _client.AcceptCallbacks.TryRemove(_streamId + _bindPort, out ignoredCb);
+                    _client.CancelAccept(_streamId + _bindPort);
                 }
                 _client.Send(msg);
             }

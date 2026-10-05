@@ -64,6 +64,7 @@ namespace InStoreLink
         private static int _lastRoomCount = -1;   // 只在房间数变化时打日志，免得刷屏
         private static Thread _onlineThread;
         private static Thread _recruitThread;
+        private static int _recruitPollingStarted;
 
         public static bool Verbose
         {
@@ -211,6 +212,9 @@ namespace InStoreLink
         /// <summary>招募列表轮询（10 秒一次），把 /recruit/list 的差量喂回游戏本体。</summary>
         public static void StartRecruitPolling(Client client)
         {
+            // 本体的 party 客户端如果每进一次选曲就重建一次，这里会被反复调用 ——
+            // 不拦一下就是每进一次多一条 10 秒轮询线程（上游没有这层保护）。
+            if (Interlocked.Exchange(ref _recruitPollingStarted, 1) == 1) return;
             _recruitThread = Interval(10000, delegate()
             {
                 if (Stopping || client == null) return;
