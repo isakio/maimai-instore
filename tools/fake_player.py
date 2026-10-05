@@ -46,6 +46,7 @@ class FakePlayer:
         self.sock = None
         self.running = True
         self.streams = {}          # sid -> 对端 stub
+        self.last_rx = time.time()  # 最近一次收到任何回包的时间（心跳线程用它判活）
         self.lobby = f"http://{args.server}:{args.lobby_port}"
 
     # ------------------------------------------------------------ 中继
@@ -73,14 +74,40 @@ class FakePlayer:
 
     def heartbeat_loop(self):
         while self.running:
-            self.send("1,3")
+            try:
+                self.send("1,3")
+            except Exception as exc:
+                print(f"[relay] 心跳发不出去（{exc}），重连", flush=True)
+                self._force_reconnect()
+                return
+            # 服务端收到心跳会原样回一条。长时间收不到任何回包 = 这条连接已经悄悄死了
+            # （NAT/防火墙把连接丢掉时不会发 FIN，recv 会一直阻塞，永远等不到 EOF）——
+            # 必须主动断开重连，否则进程还活着、房间还挂在大厅，但中继那边早就当它离线了。
+            if time.time() - self.last_rx > 20:
+                print("[relay] 20 秒没收到任何回包，判定连接已死，重连", flush=True)
+                self._force_reconnect()
+                return
             time.sleep(1)
+
+    def _force_reconnect(self):
+        """把 socket 关掉，让 read_loop 退出 → connect_relay 重连。"""
+        try:
+            if self.sock is not None:
+                self.sock.shutdown(socket.SHUT_RDWR)
+        except Exception:
+            pass
+        try:
+            if self.sock is not None:
+                self.sock.close()
+        except Exception:
+            pass
 
     def read_loop(self):
         buf = b""
         while self.running:
             try:
                 chunk = self.sock.recv(4096)
+                self.last_rx = time.time()
             except Exception:
                 break
             if not chunk:

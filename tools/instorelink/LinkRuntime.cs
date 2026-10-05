@@ -58,6 +58,8 @@ namespace InStoreLink
         public static int OnlineUserCount;
         public static int MusicIdSum;
         public static bool SideMessageFlag;
+        /// <summary>诊断用：上一次看到的选曲光标位置（看这一栏能不能把光标挪到第 2 间）。</summary>
+        public static int LastCursor = -1;
 
         private static bool _checkAuthCalled;
         private static bool _isInit;

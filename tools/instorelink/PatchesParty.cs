@@ -434,6 +434,17 @@ namespace InStoreLink
             IManager manager = LinkRuntime.PartyMan;
             if (manager == null) return;
 
+            // 诊断：这一栏（店内联机）里光标能不能挪到第 2 间？
+            // 玩家反馈"怎么按都是第一间"，先分清是"光标挪不动"还是"我们读错了位置"。
+            int cursor = __instance.CurrentMusicSelect;
+            if (LinkRuntime.LastCursor != cursor)
+            {
+                LinkRuntime.LastCursor = cursor;
+                List<RecruitInfo> rows = LinkRuntime.ConnectList;
+                LinkLog.Info("选曲光标 -> 第 " + (cursor + 1) + " 项（这一栏共 "
+                             + (rows == null ? 0 : rows.Count) + " 间）");
+            }
+
             // 房间列表有变化（曲目 ID 之和变了）→ 让本体重画列表
             List<RecruitInfo> withoutMe = manager.GetRecruitListWithoutMe();
             int sum = 0;
@@ -520,12 +531,11 @@ namespace InStoreLink
             // 那是"上一次显示过的顺序"，可能是空的/过期的（踩过：房间明明喂进去了，分类栏却一直空着）。
             if (!__instance.IsConnectingMusic && recruits.Count > 0)
             {
-                // 关键顺序：**先按最新房间列表重建一遍"联机歌曲列表"**（顺便刷新 ConnectList 里
-                // 真正的显示顺序），再按光标取房间。反过来做（先按旧快照取房间、再重建）会在
-                // 房间里有两个以上时取错：旧快照只有 1 项，光标在第二行就被夹回第 0 项 →
-                // 明明选了真朋友那一行，实际连的却是另一个房间（踩过）。
-                ApplyConnectData(__instance, ____connectCombineMusicDataList, ____currentPlayerSubSequence);
-
+                // ★ 这里**不要**重建列表！ApplyConnectData 一重建，选曲光标就被弹回第 0 项
+                // （玩家实测：按第 2 间之后光标立刻跳回第 1 间），于是读到的永远是第 1 间 ——
+                // "怎么按都是第一间"就是这么来的（前后栽了两次）。
+                // 列表由游戏自己调 SetConnectData 时重建（我们那层补丁负责），这里只需要
+                // 按"玩家现在看到的顺序"（ConnectList）+ 当前光标取房间。
                 List<RecruitInfo> shown = LinkRuntime.ConnectList;
                 if (shown == null || shown.Count == 0) shown = recruits;
                 int index = __instance.CurrentMusicSelect;
