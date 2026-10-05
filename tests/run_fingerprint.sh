@@ -43,12 +43,10 @@ if [ ! -f "$ROOT/build/fingerprint.exe" ]; then
     exit 1
 fi
 
-# 2) 保证 build/ 里两份都是刚编的（InStoreLink 由 run_all.sh 的第 1 步产出，
-#    但单独跑这个脚本时可能还没有，缺了就补一下）
-if [ ! -f "$ROOT/build/InStoreLink.dll" ]; then
-    bash "$ROOT/tools/build_wsl.sh" "$GAME" || exit 1
-fi
-# 每次都重编：InStoreMatch 是单文件、零点几秒，省掉"build/ 里那份是不是过期了"的判断
+# 2) 两份都必须**刚编的**：不然拿两个都过期的产物比，会假报"一致"
+#    （踩过：改完源码单独跑这个脚本，build/ 里还是上一次的 dll，白高兴一场）
+bash "$ROOT/tools/build_wsl.sh" "$GAME" || exit 1
+# InStoreMatch 是单文件、零点几秒，也一并重编
 IM_ARGS=(/target:library /nologo /optimize+ "/out:$(to_win "$ROOT/build")\\InStoreMatch.dll")
 for ref in \
     "MelonLoader\\net35\\MelonLoader.dll" \

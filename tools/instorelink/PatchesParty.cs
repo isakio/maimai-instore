@@ -34,6 +34,7 @@ namespace InStoreLink
         private static MethodInfo _recvStartRecruit;
         private static MethodInfo _recvFinishRecruit;
         private static Client _gameClient;
+        private static bool _reflectionWarned;
 
         // ------------------------------------------------------------ 招募列表
 
@@ -64,17 +65,28 @@ namespace InStoreLink
                 _recvFinishRecruit = typeof(Client).GetMethod("RecvFinishRecruit",
                     BindingFlags.NonPublic | BindingFlags.Instance);
 
+            // 反射都拿不到的话，房间根本没法喂回游戏。这里直接返回、把队列留着，
+            // 免得像"先出队再 break"那样把事件一条条丢掉。
+            if (_recvStartRecruit == null || _recvFinishRecruit == null)
+            {
+                if (!_reflectionWarned)
+                {
+                    _reflectionWarned = true;
+                    LinkLog.Error("拿不到 Client.RecvStartRecruit / RecvFinishRecruit —— "
+                                  + "对方开的房间没法显示（游戏版本不匹配？）");
+                }
+                return;
+            }
+
             RecruitInfo info;
             while (LinkRuntime.PendingFinishes.TryDequeue(out info))
             {
-                if (_recvFinishRecruit == null) break;
                 Packet packet = new Packet(info.IpAddress);
                 packet.encode(new FinishRecruit(info));
                 _recvFinishRecruit.Invoke(client, new object[] { packet });
             }
             while (LinkRuntime.PendingStarts.TryDequeue(out info))
             {
-                if (_recvStartRecruit == null) break;
                 Packet packet = new Packet(info.IpAddress);
                 packet.encode(new StartRecruit(info));
                 _recvStartRecruit.Invoke(client, new object[] { packet });
@@ -241,6 +253,12 @@ namespace InStoreLink
 
                     CombineMusicSelectData combine = new CombineMusicSelectData();
                     var notes = Singleton<NotesListManager>.Instance.GetNotesList()[musicId];
+                    // 没有谱面列表就没法构歌单（上游这里直接空引用崩游戏，我们跳过这条房间）
+                    if (notes == null || notes.NotesList == null)
+                    {
+                        LinkLog.Warn("曲目 " + musicId + " 没有谱面列表，这个房间先不显示");
+                        continue;
+                    }
                     if (musicId < 10000) combine.existStandardScore = true;
                     else if (musicId > 10000 && musicId < 20000) combine.existDeluxeScore = true;
 
