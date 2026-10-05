@@ -40,7 +40,6 @@ to_win() {
 }
 
 GAME_WIN="$(to_win "$GAME_WSL")"
-SRC_WIN="$(to_win "$ROOT/src")"
 OUT_WIN="$(to_win "$BUILD")\\InStoreLink.dll"
 
 args=(/target:library /nologo /langversion:5 /optimize+ "/out:$OUT_WIN")

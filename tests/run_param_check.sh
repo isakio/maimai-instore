@@ -18,8 +18,15 @@ if [ ! -f "$CECIL_WSL" ]; then
     echo "找不到 $CECIL_WSL（游戏目录不对？）" >&2
     exit 1
 fi
-if [ ! -f "$ROOT/build/InStoreLink.dll" ]; then
-    echo "还没有 build/InStoreLink.dll，先跑 tools/build_wsl.sh" >&2
+# 要查哪些程序集：
+#   build/  —— 刚编出来的，源码一改就能第一时间发现回归
+#   client/ —— 真正发给用户的那一份，能发现"源码改了但忘了重编发行版"
+# 两个都在就都查；只要求至少有一个，方便单独跑源码那份。
+DLLS=()
+[ -f "$ROOT/build/InStoreLink.dll" ] && DLLS+=("$ROOT/build/InStoreLink.dll")
+[ -f "$ROOT/client/InStoreLink.dll" ] && DLLS+=("$ROOT/client/InStoreLink.dll")
+if [ ${#DLLS[@]} -eq 0 ]; then
+    echo "build/ 和 client/ 里都没有 InStoreLink.dll，先跑 tools/build_wsl.sh" >&2
     exit 1
 fi
 
@@ -37,6 +44,12 @@ cp -f "$CECIL_WSL" "$ROOT/build/Mono.Cecil.dll"
     "$(to_win "$ROOT/tools/check_patch_params.cs")" 2>&1 | iconv -f GBK -t UTF-8 2>/dev/null
 chmod +x "$ROOT/build/check_patch_params.exe"
 
-"$ROOT/build/check_patch_params.exe" \
-    "$(to_win "$ROOT/build/InStoreLink.dll")" \
-    "$(to_win "$GAME/Sinmai_Data/Managed/Assembly-CSharp.dll")"
+RC=0
+for dll in "${DLLS[@]}"; do
+    echo
+    echo "--- 检查 ${dll#"$ROOT"/}"
+    "$ROOT/build/check_patch_params.exe" \
+        "$(to_win "$dll")" \
+        "$(to_win "$GAME/Sinmai_Data/Managed/Assembly-CSharp.dll")" || RC=1
+done
+exit "$RC"

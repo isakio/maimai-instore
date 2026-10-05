@@ -16,10 +16,11 @@
 tools/instorelink/            ← 重写版源码：C# 5，11 个文件（本文件讲的就是它）
 tools/build_instorelink.ps1   ← Windows 侧构建（用系统自带 csc.exe，不需要 SDK）
 tools/build_wsl.sh            ← WSL 侧构建（借用 Windows 的 csc.exe）
-tests/                        ← 测试：协议单测 / 向量 / 端到端 / 兼容探针 / 参数名
+tools/fingerprint.cs          ← 程序集指纹：判断发行版 dll 是不是当前源码编的
+tests/                        ← 测试：协议单测 / 向量 / 端到端 / 兼容探针 / 参数名 / 发行版指纹
 ├── ProtocolTests.cs          ← 协议层单测（不依赖游戏，能单独编出来跑）
 ├── GameCompatProbe.cs        ← 游戏兼容性探针（补丁目标 / 注入字段类型）
-├── run_all.sh                ← 一键跑全部（6 步）
+├── run_all.sh                ← 一键跑全部（7 步）
 └── py/{linkproto,test_vectors,test_e2e}.py
 docs/客户端mod实现.md          ← 本文件
 ```
@@ -134,7 +135,7 @@ docs/客户端mod实现.md          ← 本文件
 
 ```python
 md5(keychip.encode()).digest()[:4]  →  大端 uint32  →  直接写成点分十进制
-# 例：W9367886794 → 243.30.220.125（= 4078886013）
+# 例（合成值）：W2718281828 → 147.117.41.153（= 2473929113）
 ```
 
 > 为什么用伪 IP：本体到处都在比较"这是不是本机地址""目标 IP 是谁"，
@@ -333,7 +334,7 @@ bash tools/build_wsl.sh /mnt/e/game/xxx/Package   # 游戏装别处时
 ## 九、测试
 
 ```bash
-bash tests/run_all.sh        # 四步全跑，30 秒内
+bash tests/run_all.sh        # 七步全跑，半分钟左右
 ```
 
 | 测试 | 覆盖什么 | 现在的结果 |
@@ -344,20 +345,22 @@ bash tests/run_all.sh        # 四步全跑，30 秒内
 | `tests/py/test_e2e.py` | 起真的 instorematchd，跑完 开房→列表→建流→传数据→关流→关房（17 项） | ✅ 全绿 |
 | `tests/GameCompatProbe.cs` | **游戏兼容性探针**：补丁目标方法是否存在、注入字段类型是否匹配、反射句柄拿不拿得到（60 项） | ✅ 全绿 |
 | `tools/check_patch_params.cs` | **参数名检查**：33 条补丁的普通参数名逐个和游戏对齐（Harmony 是按名字传参的） | ✅ 全绿 |
+| `tools/fingerprint.cs` | **发行版指纹**：`client/` 里那两个 dll 是不是真的由当前源码编出来的（csc 输出不可复现，md5 比不出来） | ✅ 全绿 |
 
 探针也可以单独跑（游戏更新之后必跑）：
 
 ```bash
 bash tests/run_probe.sh      # 临时把探针拷进 Managed\ 执行，跑完自动删掉
 bash tests/run_param_check.sh  # 只查参数名（秒级）
+bash tests/run_fingerprint.sh  # 只查发行版 dll 有没有落后于源码
 ```
 
-还没做的：**进游戏实测**。协议层、服务器侧、补丁目标都验过了，剩下的必须在真机上跑
-（这也是唯一能验 Harmony 补丁对不对的办法）：
+真机上要看的日志（进游戏实测已经在 2026-10-05 跑过三轮，见上一节的「当前状态」）：
 
 1. `Mods\` 里删掉 `WorldLink.dll`，放入 `InStoreLink.dll`，重启游戏；
-2. 日志里应出现 `[InStoreLink] ... 已加载`、`通信层补丁已应用` / `招募/选曲补丁已应用`、
-   `挂钩完成，共 N 个`（N 在 30 上下，因为有几条补丁瞄的是同名不同签名的重载）；
+2. 日志里逐条打 `[InStoreLink]   ✓ 补丁名 → 目标方法`（33 行），然后是
+   `[InStoreLink] 挂钩完成，共 33 条生效`；哪条挂不上会点名 `✗` 并把异常打出来
+   （逐条挂载，一条失败不会连累其余补丁）；
 3. `[InStoreLink] 已连接中继 isakio.cn:20101（本机伪 IP …）`；
 4. 进选曲界面 → 店内マッチング → 用 `fake_player.py` 或朋友开房验证能否看到并进入。
 

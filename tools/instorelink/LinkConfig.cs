@@ -1,6 +1,6 @@
 ﻿// InStoreLink —— 配置读取
 //
-// 只认 WorldLink.toml 里的三个键：
+// 认这三个键（优先读 InStoreLink.toml，找不到就回退读老的 WorldLink.toml）：
 //   LobbyUrl = "http://isakio.cn:20100"   大厅地址（必填，缺省用我们的公共大厅）
 //   RelayUrl = "isakio.cn:20101"          可选：不走大厅 /info，直接指定中继
 //   Debug    = false                       可选：打详细日志

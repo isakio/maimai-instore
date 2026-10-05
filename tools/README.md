@@ -14,8 +14,9 @@ PYTHONPATH=/tmp/dntools python3 il.py type <rid>          # 方法属于哪个�
 PYTHONPATH=/tmp/dntools python3 il.py methods <类名关键词>  # 列类的方法
 PYTHONPATH=/tmp/dntools python3 il.py fields <类名关键词>   # 列类的字段
 
-# 分析客户端 mod（仓库里的 client/WorldLink.dll，NyanLink 官方构建）：
-IL_ASSEMBLY=../client/WorldLink.dll PYTHONPATH=/tmp/dntools python3 il.py dump rid:<rid>
+# 分析客户端 mod（仓库里发行的那份 client/InStoreLink.dll）：
+IL_ASSEMBLY=../client/InStoreLink.dll PYTHONPATH=/tmp/dntools python3 il.py dump rid:<rid>
+# （想对照上游那份 WorldLink.dll 的话，切到 legacy-worldlink 分支，它只在那边）
 ```
 
 `rid:` 形式用来精确指定同名方法（比如一堆类都有 `OnStart`）。
@@ -151,9 +152,13 @@ bash tools/build_wsl.sh [游戏目录]           # 产物 build/InStoreLink.dll
 改完之后**先跑测试再进游戏**（游戏里的错误要重启一次游戏才能看到，很费时间）：
 
 ```bash
-bash tests/run_all.sh          # 6 步：编译 / 协议单测 / 向量 / 端到端 / 兼容探针 / 参数名
+bash tests/run_all.sh          # 7 步：编译 / 协议单测 / 向量 / 端到端 / 兼容探针 / 参数名 / 发行版指纹
 bash tests/run_param_check.sh  # 只查补丁参数名（秒级，改完补丁先跑这个）
 ```
+
+> **改了源码记得重编 `client/` 里那份**：csc 的输出不可复现（每次编译 MVID / 时间戳都变，
+> md5 必然不同），所以「发行版是不是落后于源码」肉眼和 md5 都看不出来 ——
+> `tests/run_fingerprint.sh` 用与编译随机性无关的指纹来比，落后就会红。
 
 ### 改这个 mod 最容易踩的两个坑
 
@@ -170,6 +175,7 @@ bash tests/run_param_check.sh  # 只查补丁参数名（秒级，改完补丁�
 | 工具 | 用途 |
 | --- | --- |
 | `check_patch_params.cs` | 补丁参数名 / 目标方法逐个对照（`tests/run_param_check.sh` 用它） |
+| `fingerprint.cs` | 程序集指纹：判断 `client/` 里那份 dll 是不是真的由当前源码编的（`tests/run_fingerprint.sh` 用它） |
 | `find_type.py` | 在 `Assembly-CSharp.dll` 里按名字查类型落哪个命名空间 |
 | `dump_sigs.cs` | 用 Mono.Cecil 打印某个 dll 里方法的真实签名（对比上游发布版用） |
 | `il.py` | 反汇编 `Assembly-CSharp.dll`（老工具，看方法实现用） |

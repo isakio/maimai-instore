@@ -83,11 +83,11 @@
 │   ├── InStoreMatch.cs            ← InStoreMatch 源码（单文件）
 │   ├── build_instorematch.ps1     ← 编译 InStoreMatch
 │   ├── check_patch_params.cs      ← 检查补丁参数名（Harmony 是按名字传参的）
-│   ├── il.py / find_type.py / dump_sigs.cs  ← 读游戏程序集的小工具
+│   ├── il.py / find_type.py / dump_sigs.cs / fingerprint.cs  ← 读游戏程序集的小工具
 │   ├── fake_player.py             ← 假玩家：不用真人就能测招募/进房
 │   └── README.md                  ← 插件内部逻辑、四个开关、踩过的坑
-├── tests/                         ← 测试：协议单测 / 向量 / 端到端 / 兼容探针 / 参数名
-│   ├── run_all.sh                 ← 一键跑全部（6 步）
+├── tests/                         ← 测试：协议单测 / 向量 / 端到端 / 兼容探针 / 参数名 / 发行版指纹
+│   ├── run_all.sh                 ← 一键跑全部（7 步）
 │   ├── ProtocolTests.cs           ← 协议层单测（不依赖游戏，能单独编出来跑）
 │   ├── GameCompatProbe.cs         ← 游戏兼容性探针（补丁目标 / 注入字段）
 │   └── py/                        ← 协议模型、真实日志反验、端到端
@@ -116,7 +116,7 @@
 
 | 文件 | 干什么 | 校验 |
 | --- | --- | --- |
-| [`client/InStoreLink.dll`](client/InStoreLink.dll) | 联机本体：注册中继、开房、把对方的房间喂回游戏 | v0.1，48128 字节 / md5 `f37f6d2096af31aac800342aa0cdbd48` |
+| [`client/InStoreLink.dll`](client/InStoreLink.dll) | 联机本体：注册中继、开房、把对方的房间喂回游戏 | v0.1，48128 字节 / md5 `64e410793e27c734baa0a2716fc4690e` |
 | [`client/InStoreMatch.dll`](client/InStoreMatch.dll) | 让选曲界面画出「店内マッチング」那一格 | v2.5，18432 字节 / md5 `1a94a9b6be9b03bfb274e41b0a8256b3` |
 
 两个文件都在本仓库的 [`client/`](client/) 里（[最新 Release](https://github.com/isakio/maimai-instore/releases/latest) 也附了），不用再去别的地方下。

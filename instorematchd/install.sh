@@ -115,4 +115,4 @@ echo "看板： http://$HOST_OVERRIDE:$LOBBY_PORT/"
 echo "在线： curl -s http://127.0.0.1:$LOBBY_PORT/online"
 echo
 echo "别忘了放行 TCP $LOBBY_PORT 和 $RELAY_PORT（ufw / firewalld / 云安全组）。"
-echo "客户端的 WorldLink.toml 写： LobbyUrl=\"http://$HOST_OVERRIDE:$LOBBY_PORT\""
+echo "客户端配置写： InStoreLink.toml 里 LobbyUrl=\"http://$HOST_OVERRIDE:$LOBBY_PORT\"（老的 WorldLink.toml 也认）"
