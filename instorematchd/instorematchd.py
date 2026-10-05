@@ -173,15 +173,19 @@ def ctl(cmd, data=None) -> str:
     return build_msg(cmd, data=data)
 
 
-def close_msg(proto, sid, src_stub, src_port, dst_stub, dst_port) -> str:
+def close_msg(proto, sid, src_stub, src_port, dst_stub, dst_port, reason=None) -> str:
     """
     发给某一方的「这条流没了」。
 
     字段要站在**收件人**的角度填：dst 是收件人、dport 是收件人自己的端口 ——
     客户端是按 `sid + 自己的端口` 找回那条流 / 那次建流的（和它内部队列的 key 一致）。
+
+    reason 会放进 data 字段：客户端会把它打进日志。以前只说"这条流没了"，
+    排查时根本分不出是"目标不在线"还是"挂起超了上限"（真踩过）。
     """
     return build_msg(CMD_TCP_CLOSE, proto=proto, sid=sid,
-                     src=src_stub, sport=src_port, dst=dst_stub, dport=dst_port)
+                     src=src_stub, sport=src_port, dst=dst_stub, dport=dst_port,
+                     data=reason)
 
 
 # ------------------------------------------------------------------ 共享状态
@@ -374,7 +378,8 @@ class RelayClient:
                     and msg["sid"] is not None and msg["dst"] is not None):
                 await self.send(close_msg(msg["proto"], msg["sid"],
                                           msg["dst"], msg["dport"],
-                                          self.stub, msg["sport"]))
+                                          self.stub, msg["sport"],
+                                          reason="目标不在线"))
             return
 
         if cmd == CMD_SEND:
@@ -399,7 +404,8 @@ class RelayClient:
                             len(self.pending), sid, self.keychip)
                 await self.send(close_msg(msg["proto"], sid,
                                           target.stub, msg["dport"],
-                                          self.stub, msg["sport"]))
+                                          self.stub, msg["sport"],
+                                          reason="服务端挂起已满，稍后再试"))
                 return
             self.pending[sid] = {"peer": target.stub, "proto": msg["proto"],
                                  "sport": msg["sport"], "dport": msg["dport"],
@@ -419,7 +425,8 @@ class RelayClient:
                 if sid is not None:
                     await self.send(close_msg(msg["proto"], sid,
                                               target.stub, msg["dport"],
-                                              self.stub, msg["sport"]))
+                                              self.stub, msg["sport"],
+                                              reason="这条挂起已经回收了"))
                 return
             target.pending.pop(sid, None)
             target.streams[sid] = self.stub
@@ -450,7 +457,8 @@ class RelayClient:
             if peer is not None and peer is not self:
                 await peer.send(close_msg(msg["proto"], sid,
                                           self.stub, msg["sport"],
-                                          peer.stub, msg["dport"]))
+                                          peer.stub, msg["dport"],
+                                          reason=msg["data"] or "对端关闭了流"))
 
         else:
             LOG.debug("未处理的命令: %s", cmd)
@@ -484,13 +492,15 @@ async def pending_sweeper(interval: float = 1.0):
                          waited, sid, client.keychip, stub_to_ip(info["peer"]))
                 await client.send(close_msg(info["proto"], sid,
                                             info["peer"], info["dport"],
-                                            client.stub, info["sport"]))
+                                            client.stub, info["sport"],
+                                            reason="对方一直没接流，已回收"))
                 peer = STATE.clients.get(info["peer"])
                 if peer is not None:
                     peer.pending.pop(sid, None)
                     await peer.send(close_msg(info["proto"], sid,
                                               client.stub, info["sport"],
-                                              peer.stub, info["dport"]))
+                                              peer.stub, info["dport"],
+                                              reason="对方放弃了这条建流"))
 
 
 async def cancel_pending_to(stub: int, reason: str):
@@ -507,7 +517,8 @@ async def cancel_pending_to(stub: int, reason: str):
             LOG.info("房间没了，取消挂起建流 sid=%s（%s）", sid, reason)
             await client.send(close_msg(info["proto"], sid,
                                         stub, info["dport"],
-                                        client.stub, info["sport"]))
+                                        client.stub, info["sport"],
+                                        reason=reason))
 
 
 async def relay_serve(host: str, port: int, heartbeat_timeout: int,

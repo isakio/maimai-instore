@@ -32,6 +32,16 @@ namespace InStoreLink
 
         public EndPoint RemoteEndPoint { get; private set; }
 
+        /// <summary>
+        /// 这条连接在中继里的流标识（`流ID + 本地端口`，和内部队列的 key 一致）。
+        /// 让"某条加入失败"能精确对应回是哪一个影子 socket —— 游戏那边是根据
+        /// ConnectSocket 的 `_socket` 反查回来找它的（见 PatchesParty）。
+        /// </summary>
+        public int StreamKey
+        {
+            get { return _streamId + _bindPort; }
+        }
+
         public EndPoint LocalEndPoint
         {
             // 上游注释说这个只在 ConnectSocket.Enter_Active 里用到，但实际没人读；
@@ -146,7 +156,14 @@ namespace InStoreLink
             int key = _streamId + _bindPort;
             _client.TcpRecvQ[key] = new ConcurrentQueue<LinkMsg>();
             // 挂起 + 超时：对方一直不接流的话，8 秒后这里会走失败分支（以前是永远等）
-            _client.AddAcceptPending(key, e);
+            PendingAccept pending = new PendingAccept();
+            pending.Args = e;
+            pending.Proto = _proto;
+            pending.Sid = _streamId;
+            pending.SPort = _bindPort;
+            pending.Dst = addr;
+            pending.DPort = remote.Port;
+            _client.AddAcceptPending(key, pending);
 
             _client.Send(new LinkMsg
             {

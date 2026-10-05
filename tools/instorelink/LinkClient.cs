@@ -34,6 +34,12 @@ namespace InStoreLink
     {
         public SocketAsyncEventArgs Args;
         public Timer Timeout;
+        // 这条挂起对应的中继报文五元组：超时收尾时要拿它们发 CTL_TCP_CLOSE 告诉服务端
+        public int Proto;
+        public int Sid;
+        public int SPort;
+        public uint Dst;
+        public int DPort;
     }
 
     public class LinkClient
@@ -125,12 +131,15 @@ namespace InStoreLink
 
         /// <summary>
         /// "这次加入没成功"的交接位：客户端线程写，游戏主线程取（见 PatchesParty 里的
-        /// ConnectSocket.Execute_Connect 补丁）。超过这个时间的条子会被丢掉，
-        /// 免得张冠李戴到下一次连接上。
+        /// ConnectSocket.Execute_Connect 补丁）。**按流 ID 分开记**：以前是一张全局条子，
+        /// 结果旧那一次的超时会把玩家刚按的新一次连接掐掉（日志里实测到过）。
+        /// 超过这个时间的条子会被丢掉，免得张冠李戴到下一次连接上。
         /// </summary>
         public const int JoinFailureWindowMs = 3000;
-        private static string _joinFailure;
-        private static int _joinFailureAt;
+        private static readonly ConcurrentDictionary<int, string> _joinFailures =
+            new ConcurrentDictionary<int, string>();
+        private static readonly ConcurrentDictionary<int, int> _joinFailureAt =
+            new ConcurrentDictionary<int, int>();
 
         /// <summary>
         /// 报告"这次加入失败"（建流超时 / 对方取消了）。
@@ -141,19 +150,20 @@ namespace InStoreLink
         /// 然后卡在联机选曲那边（比不触发还糟）。所以这里只留个条子，由主线程的补丁
         /// 去调本体自己的 `SocketBase.error()`，让游戏按"连接失败"的原有流程收尾。
         /// </summary>
-        public static void ReportJoinFailure(string message)
+        public static void ReportJoinFailure(int key, string message)
         {
-            _joinFailure = message;
-            _joinFailureAt = Environment.TickCount;
+            _joinFailures[key] = message;
+            _joinFailureAt[key] = Environment.TickCount;
         }
 
-        /// <summary>主线程取走失败原因；没有（或者已经太旧）返回 null。</summary>
-        public static string TakeJoinFailure()
+        /// <summary>主线程取走**某条流**的失败原因；没有（或者已经太旧）返回 null。</summary>
+        public static string TakeJoinFailure(int key)
         {
-            string msg = _joinFailure;
-            if (msg == null) return null;
-            _joinFailure = null;
-            if (unchecked(Environment.TickCount - _joinFailureAt) > JoinFailureWindowMs) return null;
+            string msg;
+            if (!_joinFailures.TryRemove(key, out msg) || msg == null) return null;
+            int at;
+            _joinFailureAt.TryRemove(key, out at);
+            if (unchecked(Environment.TickCount - at) > JoinFailureWindowMs) return null;
             return msg;
         }
 
@@ -403,15 +413,14 @@ namespace InStoreLink
         /// 登记一次"等对方接流"，并起一个一次性超时器。
         /// 超时那一支见 <see cref="FailAccept"/>。
         /// </summary>
-        public void AddAcceptPending(int key, SocketAsyncEventArgs args)
+        public void AddAcceptPending(int key, PendingAccept pending)
         {
-            PendingAccept pending = new PendingAccept();
-            pending.Args = args;
+            if (pending == null) return;
             AcceptPending[key] = pending;
             pending.Timeout = new Timer(delegate(object state)
             {
                 FailAccept(key, "建流超时：" + AcceptTimeoutMs + "ms 内对方没有接流"
-                                + "（房间可能已经关了，或者对方直接开打了）");
+                                + "（对方不在线 / 房间已经关了 / 或者他直接开打了）");
             }, null, AcceptTimeoutMs, Timeout.Infinite);
         }
 
@@ -441,7 +450,15 @@ namespace InStoreLink
             if (!AcceptPending.TryRemove(key, out pending) || pending == null) return;
             StopTimer(pending);
             LinkLog.Warn(why);
-            ReportJoinFailure(why);
+            // 顺手告诉服务端"这条挂起我不要了"。以前只清本地，服务端那条要留满它的
+            // pending 超时（默认 10 秒）—— 连点几次就攒起来，攒到上限之后**新的一次
+            // 加入会被服务端当场拒掉**，玩家看到的是"一按 NEXT 就弹提示退出"。
+            Send(new LinkMsg
+            {
+                Cmd = (int)LinkCmd.CtlTcpClose, Proto = pending.Proto, Sid = pending.Sid,
+                Src = StubIp, SPort = pending.SPort, Dst = pending.Dst, DPort = pending.DPort
+            });
+            ReportJoinFailure(key, why);
         }
 
         /// <summary>放弃一次挂起（游戏自己把 socket 关了、或我们退出时）。</summary>
@@ -470,7 +487,9 @@ namespace InStoreLink
             //    房主没等人就开打了，服务端把挂起的建流取消掉）。
             if (AcceptPending.ContainsKey(key))
             {
-                FailAccept(key, "对方取消了这次建流（sid " + msg.Sid.Value + "）");
+                // 服务端现在会把拒绝原因放在 data 里（目标不在线 / 挂起流过多 / 挂起已回收…）
+                string reason = string.IsNullOrEmpty(msg.Data) ? "对方取消了这次建流" : msg.Data;
+                FailAccept(key, "加入失败：" + reason + "（sid " + msg.Sid.Value + "）");
                 return;
             }
 

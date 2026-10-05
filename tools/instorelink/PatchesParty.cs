@@ -329,6 +329,8 @@ namespace InStoreLink
 
         private static MethodInfo _socketError;
         private static bool _socketErrorWarned;
+        private static FieldInfo _socketField;
+        private static bool _socketFieldWarned;
 
         /// <summary>
         /// 加入失败时，走**本体自己的**失败路径。
@@ -350,7 +352,7 @@ namespace InStoreLink
         [HarmonyPatch(typeof(PartyLink.ConnectSocket), "Execute_Connect")]
         public static bool PreConnectSocketExecute(PartyLink.ConnectSocket __instance)
         {
-            string why = LinkClient.TakeJoinFailure();
+            string why = TakeFailureFor(__instance);
             if (why == null) return true;
 
             if (_socketError == null)
@@ -382,6 +384,37 @@ namespace InStoreLink
                 return true;
             }
             return false;                    // 跳过原方法，别让它把状态推到 Active
+        }
+
+        /// <summary>
+        /// "这次加入失败"只对应**某一条**连接。这里把 ConnectSocket 反查成我们的影子 socket，
+        /// 再按那条流的 StreamKey 取失败原因 —— 不这么做的话，旧那一次的超时会把玩家
+        /// 刚按的新一次连接掐掉（日志里实测到过：新连接发出 12ms 后被旧的超时收走）。
+        ///
+        /// 路径：ConnectSocket._socket（NFSocket）→ LinkRuntime.Redirect → 影子 socket。
+        /// </summary>
+        private static string TakeFailureFor(PartyLink.ConnectSocket socket)
+        {
+            if (socket == null || LinkRuntime.Client == null) return null;
+
+            if (_socketField == null)
+            {
+                const BindingFlags Flags = BindingFlags.NonPublic | BindingFlags.Instance;
+                _socketField = typeof(PartyLink.SocketBase).GetField("_socket", Flags)
+                            ?? typeof(PartyLink.ConnectSocket).GetField("_socket", Flags);
+                if (_socketField == null && !_socketFieldWarned)
+                {
+                    _socketFieldWarned = true;
+                    LinkLog.Error("拿不到 ConnectSocket._socket —— 加入失败时无法对应到具体哪条连接");
+                }
+            }
+            if (_socketField == null) return null;
+
+            NFSocket nf = _socketField.GetValue(socket) as NFSocket;
+            if (nf == null) return null;
+            LinkSocket shadow;
+            if (!LinkRuntime.Redirect.TryGetValue(nf, out shadow) || shadow == null) return null;
+            return LinkClient.TakeJoinFailure(shadow.StreamKey);
         }
 
         [HarmonyPrefix]

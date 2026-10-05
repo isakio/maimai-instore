@@ -62,6 +62,21 @@ public static class ClientTests
         return new LinkClient(keychip, "127.0.0.1", 1);
     }
 
+    /// <summary>造一条"等对方接流"的挂起记录，返回它的 key（流ID + 本地端口）。</summary>
+    private static int AddPending(LinkClient c, int sid, int port, Probe p)
+    {
+        PendingAccept pa = new PendingAccept();
+        pa.Args = p.Args;
+        pa.Proto = LinkProto.Tcp;
+        pa.Sid = sid;
+        pa.SPort = port;
+        pa.Dst = 0x7F000001u;      // 单测不发真包，路由字段只要求不为空
+        pa.DPort = 50100;
+        int key = sid + port;
+        c.AddAcceptPending(key, pa);
+        return key;
+    }
+
     public static int Main()
     {
         try { Console.OutputEncoding = new System.Text.UTF8Encoding(false); }
@@ -95,12 +110,12 @@ public static class ClientTests
         LinkClient c = NewClient("W9CLIENT0001");
         int sid = 111, port = 60001;
         Probe p = new Probe();
-        c.AddAcceptPending(sid + port, p.Args);
-        c.CompleteAccept(sid + port);
+        int key = AddPending(c, sid, port, p);
+        c.CompleteAccept(key);
 
         Check(p.Calls == 1, "完成事件触发一次");
         Check(p.Error == SocketError.Success, "错误码是 Success");
-        Check(!c.AcceptPending.ContainsKey(sid + port), "挂起记录已摘掉");
+        Check(!c.AcceptPending.ContainsKey(key), "挂起记录已摘掉");
     }
 
     private static void TestAcceptThenLateTimeout()
@@ -109,11 +124,11 @@ public static class ClientTests
         LinkClient c = NewClient("W9CLIENT0002");
         int sid = 222, port = 60002;
         Probe p = new Probe();
-        c.AddAcceptPending(sid + port, p.Args);
-        c.CompleteAccept(sid + port);
+        int key = AddPending(c, sid, port, p);
+        c.CompleteAccept(key);
         Thread.Sleep(900);                       // 远超上面设的 300ms
         Check(p.Calls == 1, "等了 3 倍超时时间，完成事件仍然只触发一次");
-        Check(LinkClient.TakeJoinFailure() == null, "成功路径不会留下失败条子");
+        Check(LinkClient.TakeJoinFailure(key) == null, "成功路径不会留下失败条子");
     }
 
     private static void TestTimeoutFires()
@@ -122,15 +137,18 @@ public static class ClientTests
         LinkClient c = NewClient("W9CLIENT0003");
         int sid = 333, port = 60003;
         Probe p = new Probe();
-        c.AddAcceptPending(sid + port, p.Args);
+        int key = AddPending(c, sid, port, p);
         Check(p.Calls == 0, "刚挂起时还没完成");
         Thread.Sleep(1200);
         // 关键：**不能**触发 Completed —— 本体只看"完成事件来过"就当连上了
         Check(p.Calls == 0, "超时不会触发 Completed（否则游戏会误判成连上）");
-        Check(!c.AcceptPending.ContainsKey(sid + port), "挂起记录已摘掉");
-        string why = LinkClient.TakeJoinFailure();
+        Check(!c.AcceptPending.ContainsKey(key), "挂起记录已摘掉");
+        string why = LinkClient.TakeJoinFailure(key);
         Check(why != null && why.Contains("超时"), "留下了失败条子交给主线程：" + why);
-        Check(LinkClient.TakeJoinFailure() == null, "条子取一次就没了（不会重复报）");
+        Check(LinkClient.TakeJoinFailure(key) == null, "条子取一次就没了（不会重复报）");
+        // 这条是回归测试：以前是一张全局条子，旧那次的超时会把新一次连接掐掉
+        Check(LinkClient.TakeJoinFailure(key + 1) == null,
+              "别的流取不到这条失败（失败是按流绑定的）");
     }
 
     private static void TestCloseCancelsPending()
@@ -140,7 +158,7 @@ public static class ClientTests
         LinkClient c = NewClient("W9CLIENT0004");
         int sid = 444, port = 60004;
         Probe p = new Probe();
-        c.AddAcceptPending(sid + port, p.Args);
+        int key = AddPending(c, sid, port, p);
 
         c.HandleIncoming(new LinkMsg
         {
@@ -148,8 +166,8 @@ public static class ClientTests
         });
 
         Check(p.Calls == 0, "同样不触发 Completed（不假装连上）");
-        Check(!c.AcceptPending.ContainsKey(sid + port), "挂起记录已摘掉");
-        string why = LinkClient.TakeJoinFailure();
+        Check(!c.AcceptPending.ContainsKey(key), "挂起记录已摘掉");
+        string why = LinkClient.TakeJoinFailure(key);
         Check(why != null && why.Contains("取消"), "立刻留下失败条子（不用干等到超时）：" + why);
         LinkClient.AcceptTimeoutMs = 300;
     }
@@ -158,9 +176,10 @@ public static class ClientTests
     {
         Console.WriteLine("7) 失败条子有保质期（避免记到下一次连接头上）");
         Check(LinkClient.JoinFailureWindowMs == 3000, "保质期 3000ms");
-        LinkClient.ReportJoinFailure("很久以前的失败");
+        int key = 9001;
+        LinkClient.ReportJoinFailure(key, "很久以前的失败");
         Thread.Sleep(3200);
-        Check(LinkClient.TakeJoinFailure() == null, "超过保质期就丢掉");
+        Check(LinkClient.TakeJoinFailure(key) == null, "超过保质期就丢掉");
     }
 
     private static void TestCloseDropsQueuedAccept()

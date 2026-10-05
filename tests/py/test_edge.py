@@ -130,6 +130,8 @@ def case_offline_target():
         got = guest.recv(timeout=2.0)
         check(got.cmd == CTL_TCP_CLOSE and got.sid == sid, "立刻收到 CLOSE", got.readable())
         check(got.dport == 60001, "CLOSE 的 dport 指向房客自己的端口（%s）" % got.dport)
+        check("目标不在线" in (got.data or ""),
+              "CLOSE 里带着拒绝原因，排查时不用猜（%s）" % got.data)
     except Exception as e:
         check(False, "立刻收到 CLOSE", str(e))
     guest.close()
@@ -182,6 +184,9 @@ def case_repeated_retries():
             break
     closes = [m for m in got if m.cmd == CTL_TCP_CLOSE]
     check(len(closes) == total, "%d 次建流都拿到了 CLOSE（实际 %d）" % (total, len(closes)))
+    reasons = [m.data or "" for m in closes]
+    check(any("挂起已满" in r for r in reasons),
+          "超过上限那几条会说明原因（挂起已满）：%s" % sorted(set(reasons)))
     guest.send(Msg(CTL_HEARTBEAT))
     try:
         check(guest.recv(timeout=2.0).cmd == CTL_HEARTBEAT, "连接仍然活着（心跳有回包）")
