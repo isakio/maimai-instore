@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# 检查「GitHub 上最新 Release 挂的那两个 dll」是不是和仓库 client/ 里的实物一致。
+# 检查「GitHub 上最新 Release 挂的附件」是不是和仓库 client/ 里的实物一致。
+# 现在是三件：两个 dll + Steam 启动器（MaimaiSteam.exe）。
 #
 #   bash tests/run_release_check.sh            # 检查 latest
 #   bash tests/run_release_check.sh v3.0       # 检查指定 tag
@@ -51,7 +52,7 @@ TAKEN_TAG="$(printf '%s\n' "$LIST" | head -1)"
 echo "tag: $TAKEN_TAG"
 
 RC=0
-for name in InStoreLink.dll InStoreMatch.dll; do
+for name in InStoreLink.dll InStoreMatch.dll MaimaiSteam.exe; do
     local_file="$ROOT/client/$name"
     if [ ! -f "$local_file" ]; then
         echo "  ✗ client/$name 不存在" >&2
@@ -83,7 +84,7 @@ done
 
 if [ "$RC" -ne 0 ]; then
     echo
-    echo "!! 把 client/ 里那两个 dll 重新挂上去（并同步 release 说明里的 md5）：" >&2
-    echo "   gh release upload $TAG client/InStoreLink.dll client/InStoreMatch.dll --clobber" >&2
+    echo "!! 把 client/ 里的附件重新挂上去（并同步 release 说明里的 md5 / 字节数）：" >&2
+    echo "   gh release upload $TAG client/InStoreLink.dll client/InStoreMatch.dll client/MaimaiSteam.exe --clobber" >&2
 fi
 exit "$RC"
