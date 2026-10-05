@@ -68,6 +68,14 @@ static DWORD FindProcessId(const std::wstring& name)
     return pid;
 }
 
+// Are we running inside a job object that lets children break away? Steam puts
+// the games it launches into a job, and processes inside it cannot load
+// mai2hook.dll into amdaemon (measured: "DLL failed to load inside target
+// process" on every attempt, while the exact same exe works outside Steam).
+// So we first try CREATE_BREAKAWAY_FROM_JOB and remember whether it worked.
+static bool g_breakawayOk = false;
+static bool g_breakawayTried = false;
+
 // Start a program with no console window; optionally capture its output to a
 // file. Returns the process handle (caller closes it) or nullptr.
 // Note: inject.exe is EXPECTED to stay alive for the whole session, so this
@@ -98,8 +106,26 @@ static HANDLE StartHidden(const std::wstring& cmdline, const fs::path* captureTo
     std::vector<wchar_t> buf(cmdline.begin(), cmdline.end());
     buf.push_back(L'\0');
     PROCESS_INFORMATION pi{};
+    DWORD flags = CREATE_NO_WINDOW;
+    if (!g_breakawayTried || g_breakawayOk) flags |= CREATE_BREAKAWAY_FROM_JOB;
+
     BOOL ok = CreateProcessW(nullptr, buf.data(), nullptr, nullptr, TRUE,
-                             CREATE_NO_WINDOW, nullptr, g_dir.c_str(), &si, &pi);
+                             flags, nullptr, g_dir.c_str(), &si, &pi);
+    if (!ok && (flags & CREATE_BREAKAWAY_FROM_JOB)) {
+        // the job does not allow breakaway - retry inside the job
+        if (!g_breakawayTried) {
+            g_breakawayTried = true;
+            g_breakawayOk = false;
+            Log("CREATE_BREAKAWAY_FROM_JOB not allowed (error "
+                + std::to_string(GetLastError()) + "), staying inside the job");
+        }
+        ok = CreateProcessW(nullptr, buf.data(), nullptr, nullptr, TRUE,
+                            CREATE_NO_WINDOW, nullptr, g_dir.c_str(), &si, &pi);
+    } else if (ok && !g_breakawayTried) {
+        g_breakawayTried = true;
+        g_breakawayOk = true;
+        Log("children will start outside the job (breakaway ok)");
+    }
     if (hOut != INVALID_HANDLE_VALUE) CloseHandle(hOut);
     if (!ok) return nullptr;
     CloseHandle(pi.hThread);
