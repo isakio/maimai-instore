@@ -424,7 +424,27 @@ namespace InStoreLink
             // 每次进选曲界面重置状态（上游同款：房间列表变了要重新刷新）
             LinkRuntime.MusicIdSum = 0;
             LinkRuntime.SideMessageFlag = false;
+            // 还要把"上次选中的那一间"松开。否则进了某间房再退出来，之后怎么按都还是那一间
+            // （玩家实测：进第 2 间 → 退出 → 再按哪儿都连第 2 间）。
+            ReleaseStickyRoom(__instance);
             return true;
+        }
+
+        /// <summary>把"当前选中的房间 / 联机列表状态"清干净，让下一轮选择从零开始。</summary>
+        private static void ReleaseStickyRoom(MusicSelectProcess instance)
+        {
+            LinkRuntime.ConnectList = null;
+            if (instance == null) return;
+            try
+            {
+                if (LinkRuntime.SetRecruitData != null)
+                    LinkRuntime.SetRecruitData.Invoke(instance, new object[] { null });
+                instance.IsConnectingMusic = false;
+            }
+            catch (Exception ex)
+            {
+                LinkLog.Debug("松开上次选中的房间时出错：" + ex.Message);
+            }
         }
 
         [HarmonyPostfix]
@@ -490,6 +510,10 @@ namespace InStoreLink
                 }
                 LinkRuntime.SideMessageFlag = false;
             }
+            // 人已经离开「店内マッチング」这一栏了 → 把上次选中的房间松开，
+            // 免得下次进来还攥着上一间（玩家实测的"锁在第 2 间"）。
+            if (!__instance.IsConnectionFolder() && LinkRuntime.ConnectList != null)
+                ReleaseStickyRoom(__instance);
         }
 
         [HarmonyPostfix]
