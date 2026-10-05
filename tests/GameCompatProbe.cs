@@ -21,12 +21,19 @@ public static class GameCompatProbe
     private static int _ok;
     private static int _bad;
     private static bool _dumpSignatures;
+    private static string _dumpFields;
 
     public static int Main(string[] argv)
     {
         try { Console.OutputEncoding = new UTF8Encoding(false); }
         catch (Exception) { }
         _dumpSignatures = argv != null && argv.Any(a => a == "--signatures");
+        _dumpFields = null;
+        if (argv != null)
+        {
+            for (int i = 0; i < argv.Length - 1; i++)
+                if (argv[i] == "--dump-fields") _dumpFields = argv[i + 1];
+        }
 
         try
         {
@@ -65,6 +72,21 @@ public static class GameCompatProbe
         {
             Console.WriteLine("找不到 Assembly-CSharp.dll —— 请在 <游戏>\\Sinmai_Data\\Managed\\ 下运行本程序。");
             return 2;
+        }
+
+        // 调试用：--dump-fields <类型名> 列出该类型所有字段（含私有），
+        // 用来查"游戏里到底是哪个字段存的光标下标"这类问题。
+        if (!string.IsNullOrEmpty(_dumpFields))
+        {
+            Type t = game.GetType(_dumpFields);
+            if (t == null) { Console.WriteLine("找不到类型 " + _dumpFields); return 2; }
+            Console.WriteLine("== " + _dumpFields + " 的字段 ==");
+            foreach (FieldInfo f in t.GetFields(BindingFlags.Public | BindingFlags.NonPublic |
+                                                BindingFlags.Instance | BindingFlags.Static))
+            {
+                Console.WriteLine("   " + Pretty(f.FieldType) + "  " + f.Name);
+            }
+            return 0;
         }
 
         // ---------------------------------------------------------------- 补丁目标

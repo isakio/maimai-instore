@@ -153,6 +153,18 @@ namespace InStoreLink
             return false;
         }
 
+        /// <summary>list 里的每个房间是否都还在 fresh 里（用来判断"显示快照"有没有过期）。</summary>
+        private static bool AllRoomsIn(List<RecruitInfo> list, List<RecruitInfo> fresh)
+        {
+            if (fresh == null) return false;
+            foreach (RecruitInfo r in list)
+            {
+                if (r == null) continue;
+                if (!ContainsRoom(fresh, r)) return false;
+            }
+            return true;
+        }
+
         /// <summary>
         /// 这个房间是不是我自己开的？（RecruitInfo.IpAddress 是游戏自己的 IpAddress 结构，
         /// 所以按原始字节比，别拿 uint 直接比 —— 类型不同，编译不过。）
@@ -277,7 +289,11 @@ namespace InStoreLink
             // 装不了的歌会被 ApplyConnectData 跳过，那时按原始列表取下标就会取错房间 ——
             // 显示的是 A 的歌、进去的是 B 的房间。
             List<RecruitInfo> list = LinkRuntime.ConnectList;
-            if (list == null) list = manager.GetRecruitListWithoutMe();
+            List<RecruitInfo> fresh = manager.GetRecruitListWithoutMe();
+            // ConnectList = 上一次真正画出来的顺序（可能是子集：装不了的歌会被跳过），
+            // 但只要它还是"当前这批房间"的子集就可以用；跟当前房间对不上（房间换了、
+            // 列表还没重建）就先用最新列表，免得中间那张卡片显示的还是旧房间。
+            if (list == null || list.Count == 0 || !AllRoomsIn(list, fresh)) list = fresh;
             if (list == null) return;
             if (__instance.CurrentMusicSelect >= 0 && __instance.CurrentMusicSelect < list.Count)
                 __result = list[__instance.CurrentMusicSelect];
@@ -300,17 +316,21 @@ namespace InStoreLink
             // 那是"上一次显示过的顺序"，可能是空的/过期的（踩过：房间明明喂进去了，分类栏却一直空着）。
             if (!__instance.IsConnectingMusic && recruits.Count > 0)
             {
-                // 取"当前光标对应的那个房间"：用 ConnectList 保证下标和显示顺序一致，
-                // 它没准备好（空/没有）时退回游戏自己的列表。
+                // 关键顺序：**先按最新房间列表重建一遍"联机歌曲列表"**（顺便刷新 ConnectList 里
+                // 真正的显示顺序），再按光标取房间。反过来做（先按旧快照取房间、再重建）会在
+                // 房间里有两个以上时取错：旧快照只有 1 项，光标在第二行就被夹回第 0 项 →
+                // 明明选了真朋友那一行，实际连的却是另一个房间（踩过）。
+                ApplyConnectData(__instance, ____connectCombineMusicDataList, ____currentPlayerSubSequence);
+
                 List<RecruitInfo> shown = LinkRuntime.ConnectList;
                 if (shown == null || shown.Count == 0) shown = recruits;
                 int index = __instance.CurrentMusicSelect;
                 if (index < 0 || index >= shown.Count) index = 0;
                 RecruitInfo recruit = shown[index];
-                LinkLog.Info("选曲界面拿到房间数据：" + JsonUtility.ToJson(recruit));
+                LinkLog.Info("选曲界面拿到房间数据（光标 " + index + "/" + (shown.Count - 1) + "）："
+                             + JsonUtility.ToJson(recruit));
                 if (LinkRuntime.SetRecruitData != null)
                     LinkRuntime.SetRecruitData.Invoke(__instance, new object[] { recruit });
-                ApplyConnectData(__instance, ____connectCombineMusicDataList, ____currentPlayerSubSequence);
                 __result = true;
             }
             return false;
