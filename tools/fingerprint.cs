@@ -34,14 +34,32 @@ public static class Fingerprint
             return 2;
         }
 
-        List<string> a = Lines(argv[0]);
+        List<string> a;
+        try
+        {
+            a = Lines(argv[0]);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine("读不了 " + argv[0] + "：" + ex.Message);
+            return 2;
+        }
         if (argv.Length == 1)
         {
             Console.WriteLine("指纹 " + Digest(a) + "  " + argv[0] + "（" + a.Count + " 项）");
             return 0;
         }
 
-        List<string> b = Lines(argv[1]);
+        List<string> b;
+        try
+        {
+            b = Lines(argv[1]);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine("读不了 " + argv[1] + "：" + ex.Message);
+            return 2;
+        }
         string da = Digest(a), db = Digest(b);
         Console.WriteLine("A  " + da + "  " + argv[0]);
         Console.WriteLine("B  " + db + "  " + argv[1]);

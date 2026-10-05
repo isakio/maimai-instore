@@ -353,6 +353,9 @@ bash tests/run_all.sh        # 七步全跑，半分钟左右
 bash tests/run_probe.sh      # 临时把探针拷进 Managed\ 执行，跑完自动删掉
 bash tests/run_param_check.sh  # 只查参数名（秒级）
 bash tests/run_fingerprint.sh  # 只查发行版 dll 有没有落后于源码
+
+# 手里有联机时抓的 *.log 时，第 3 步会额外拿真实报文再验一遍（不设就跳过）
+MAIMAI_LOGS=/path/to/logs bash tests/run_all.sh
 ```
 
 真机上要看的日志（进游戏实测已经在 2026-10-05 跑过三轮，见上一节的「当前状态」）：

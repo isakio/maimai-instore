@@ -156,6 +156,13 @@ bash tests/run_all.sh          # 7 步：编译 / 协议单测 / 向量 / 端到
 bash tests/run_param_check.sh  # 只查补丁参数名（秒级，改完补丁先跑这个）
 ```
 
+第 3 步（Python 向量）默认会跳过「真实抓包日志反验」——不设环境变量就没有日志可读。
+手里有联机时抓的 `*.log` 时，指一下目录它就会拿真实报文再验一遍：
+
+```bash
+MAIMAI_LOGS=/path/to/logs bash tests/run_all.sh
+```
+
 > **改了源码记得重编 `client/` 里那份**：csc 的输出不可复现（每次编译 MVID / 时间戳都变，
 > md5 必然不同），所以「发行版是不是落后于源码」肉眼和 md5 都看不出来 ——
 > `tests/run_fingerprint.sh` 用与编译随机性无关的指纹来比，落后就会红。

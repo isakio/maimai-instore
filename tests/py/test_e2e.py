@@ -5,8 +5,8 @@
   两个客户端注册 → 房主开房（HTTP）→ 房客拉列表 → 房客建流 → 房主接流
   → 房客发数据 → 房主收到同样的字节 → 关流 → 关房
 
-服务器默认用公共仓库里的那套：
-  /home/isakio/maimai-instore/instorematchd/instorematchd.py
+服务器默认用本仓库里的那套（相对本文件定位，跟仓库放哪儿无关）：
+  <仓库>/instorematchd/instorematchd.py
 （可以用 IMD_SERVER_PY 换路径，用 IMD_LOBBY/IMD_RELAY 换端口）
 """
 
@@ -25,8 +25,9 @@ from linkproto import (MockClient, Msg, stub_u32, u32_to_ip,
                        CTL_HEARTBEAT, CTL_TCP_CONNECT, CTL_TCP_ACCEPT,
                        CTL_TCP_CLOSE, DATA_SEND, PROTO_TCP)
 
-SERVER = os.environ.get("IMD_SERVER_PY",
-                        "/home/isakio/maimai-instore/instorematchd/instorematchd.py")
+# 默认按本文件的位置找仓库里的服务端：tests/py/ -> tests/ -> <仓库>/
+SERVER = os.environ.get("IMD_SERVER_PY", os.path.normpath(os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "..", "..", "instorematchd", "instorematchd.py")))
 HOST = "127.0.0.1"
 LOBBY = int(os.environ.get("IMD_LOBBY", "21200"))
 RELAY = int(os.environ.get("IMD_RELAY", "21201"))
