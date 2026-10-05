@@ -234,8 +234,43 @@ def case_pending_timeout():
     guest.close()
 
 
+def visible_rooms():
+    _, listing = http("GET", "/recruit/list")
+    out = []
+    for line in listing.split("\n"):
+        if line.strip():
+            out.append(json.loads(line)["RecruitInfo"])
+    return out
+
+
+def room_visible(stub):
+    for r in visible_rooms():
+        if r["MechaInfo"]["IpAddress"] == stub:
+            return True
+    return False
+
+
+def case_ghost_room_not_published():
+    print("6) 房主不在中继上的房间不公开（幽灵房）")
+    kc = "W9EDGEGHOST1"
+    stub = stub_u32(kc)
+    code, _ = http("POST", "/recruit/start", recruit_body(kc, stub))
+    check(code == 200, "上报接口本身仍然接受（HTTP %s）" % code)
+    time.sleep(0.3)
+    check(not room_visible(stub), "但它不会出现在房间列表里（玩家点都点不到）")
+
+    host = MockClient(kc, HOST, RELAY)          # 房主真正连上中继
+    host.recv()
+    try:
+        http("POST", "/recruit/start", recruit_body(kc, stub))
+        check(room_visible(stub), "房主上线之后再报，就正常公开了")
+    finally:
+        host.close()
+        http("POST", "/recruit/finish", recruit_body(kc, stub))
+
+
 def case_limits():
-    print("6) 开房限速 / 房间总数上限")
+    print("7) 开房限速 / 房间总数上限")
     srv = Server(pending_timeout=10, max_rooms=2)
     try:
         codes = []
@@ -272,6 +307,7 @@ def main():
         case_repeated_retries()
         case_bad_keychip()
         case_pending_timeout()
+        case_ghost_room_not_published()
     finally:
         srv.stop()
 

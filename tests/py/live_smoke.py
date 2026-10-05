@@ -78,6 +78,23 @@ def my_room_visible(stub):
     return False
 
 
+def visible_rooms():
+    _, listing = http("GET", "/recruit/list")
+    out = []
+    for line in listing.split("\n"):
+        if line.strip():
+            out.append(json.loads(line)["RecruitInfo"])
+    return out
+
+
+def try_recv(client, timeout=0.3):
+    """收一条；超时就当没有 —— 用来判断"谁收到了/谁没收到"。"""
+    try:
+        return client.recv(timeout=timeout)
+    except Exception:
+        return None
+
+
 def drain(client, want_cmd, timeout=15.0):
     """等一条指定命令，返回 (消息, 耗时秒)；超时抛异常。"""
     t0 = time.time()
@@ -285,6 +302,9 @@ def l7_room_ttl_and_refresh():
     print("\nL7 房间 30 秒 TTL vs 客户端每 10 秒续报")
     hk = "W9LIVE00000C"
     stub = stub_u32(hk)
+    # 房主必须在中继上：服务端不会公开"房主不在中继上"的房间（见 L9）
+    host = MockClient(hk, SERVER, RELAY)
+    host.recv()
     try:
         http("POST", "/recruit/start", recruit_body(hk, stub))
         check(my_room_visible(stub), "开房后立刻能看到")
@@ -304,6 +324,61 @@ def l7_room_ttl_and_refresh():
         check(not my_room_visible(stub), "停止续报 ~32 秒后房间自动消失（TTL 兜底仍然有效）")
     finally:
         finish(hk, stub)
+        host.close()
+
+
+def l9_ghost_room_not_published():
+    print("\nL9 房主不在中继上的房间不公开（幽灵房）")
+    kc, stub = "W9LIVEGHOST1", stub_u32("W9LIVEGHOST1")
+    code, _ = http("POST", "/recruit/start", recruit_body(kc, stub))
+    check(code == 200, "上报接口本身仍然接受（HTTP %s）" % code)
+    time.sleep(0.3)
+    check(not my_room_visible(stub), "但它不会出现在房间列表里（玩家点都点不到）")
+
+    host = MockClient(kc, SERVER, RELAY)          # 房主真正连上中继
+    host.recv()
+    try:
+        http("POST", "/recruit/start", recruit_body(kc, stub))
+        check(my_room_visible(stub), "房主上线之后再报，就正常公开了")
+    finally:
+        host.close()
+        finish(kc, stub)
+
+
+def l10_multi_room_picks_the_right_one():
+    print("\nL10 10 个房间同时挂着时，选哪间进哪间")
+    n = 10
+    hosts = []
+    try:
+        for i in range(n):
+            kc = "W9LIVEMULTI%02d" % i
+            c = MockClient(kc, SERVER, RELAY)
+            c.recv()
+            http("POST", "/recruit/start",
+                 recruit_body(kc, stub_u32(kc), music_id=12100 + i, name="多房%02d" % i))
+            hosts.append((kc, c))
+        shown = [r for r in visible_rooms() if 12100 <= r["MusicID"] < 12100 + n]
+        check(len(shown) == n, "10 个房间都在列表里（实际 %d）" % len(shown))
+
+        idx = 6                                  # 挑第 7 间
+        tk, tc = hosts[idx]
+        gk = "W9LIVEMULTIGST"
+        g = MockClient(gk, SERVER, RELAY)
+        g.recv()
+        sid = 990001
+        g.send(Msg(CTL_TCP_CONNECT, proto=PROTO_TCP, sid=sid, src=stub_u32(gk),
+                   sport=60021, dst=stub_u32(tk), dport=50100))
+        hit = []
+        for kc, c in hosts:
+            m = try_recv(c, 0.3)
+            if m is not None:
+                hit.append(kc)
+        check(hit == [tk], "只有被选中那间收到了建流请求（收到的是 %s）" % hit)
+        g.close()
+    finally:
+        for kc, c in hosts:
+            c.close()
+            finish(kc, stub_u32(kc))
 
 
 def l8_second_guest():
@@ -345,7 +420,8 @@ def main():
     t0 = time.time()
     for fn in (l1_happy_path, l2_host_starts_playing, l3_target_offline,
                l4_repeated_retries, l5_pending_timeout, l6_host_drops_mid_stream,
-               l8_second_guest, l7_room_ttl_and_refresh):
+               l8_second_guest, l9_ghost_room_not_published,
+               l10_multi_room_picks_the_right_one, l7_room_ttl_and_refresh):
         try:
             fn()
         except Exception as e:

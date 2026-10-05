@@ -215,6 +215,15 @@ class State:
                     if now - v["ts"] > self.recruit_ttl]
             for k in gone:
                 self.recruits.pop(k, None)
+            # 房主已经不在中继上的房间直接撤掉。房间是靠 HTTP 挂着续命的，房主掉线之后
+            # 那间房还能被看到，但**谁点进去都只会得到"目标不在线"** —— 玩家看到的是
+            # "列表里有房间、一按 NEXT 就秒退"，会以为 mod 坏了（真踩过：一个只发 HTTP、
+            # 不上中继的测试房主，把整轮真机复测都绕进去了）。
+            # 客户端每 10 秒会重报一次，所以房主重连之后房间很快就会回来。
+            orphan = [k for k, v in self.recruits.items()
+                      if v.get("keychip") and keychip_to_stub(v["keychip"]) not in self.clients]
+            for k in orphan:
+                self.recruits.pop(k, None)
             # 开房限速表也顺手清一下：只留这个时间窗口里还有记录的来源，
             # 不然一个公开接口攒久了就是一张无限增长的 IP 表。
             stale = [s for s, q in self.room_posts.items()
