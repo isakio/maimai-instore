@@ -98,19 +98,6 @@ foreach ($name in @("InStoreLink.dll", "InStoreMatch.dll")) {
     Write-Host "[OK] $name -> $dst" -ForegroundColor Green
 }
 
-# 可选：顺手装"Steam 启动器"（MaimaiSteam.exe，放游戏根目录）。
-# 不加进 Steam 也完全不影响正常游玩；仓库没带这个文件时跳过。
-$steamExe = Join-Path $PSScriptRoot "MaimaiSteam.exe"
-if (Test-Path $steamExe) {
-    Copy-Item $steamExe (Join-Path $GameDir "MaimaiSteam.exe") -Force
-    Write-Host "[OK] Steam 启动器 -> $GameDir\MaimaiSteam.exe" -ForegroundColor Green
-    Write-Host "     想在 Steam 里启动 maimai：库 -> 添加非 Steam 游戏 -> 选这个 exe，起始位置填 $GameDir" -ForegroundColor DarkGray
-    Write-Host "     （它自己会把注入挪出 Steam 的进程树，不用改 Steam 设置、也不会弹黑框）" -ForegroundColor DarkGray
-    Write-Host "     （不改 Steam 也没关系，双击你原来的 start.bat 照常玩）" -ForegroundColor DarkGray
-} else {
-    Write-Host "[--] 仓库里没有 Steam 启动器（client\MaimaiSteam.exe），跳过" -ForegroundColor DarkGray
-}
-
 # 配置文件：**默认不覆盖已有的**（免得把用户自己填的大厅地址冲掉）。
 # 只有显式给了 -LobbyUrl，或者文件还不存在时才会写。
 $tomlPath = Join-Path $GameDir "InStoreLink.toml"

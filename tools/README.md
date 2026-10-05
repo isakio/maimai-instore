@@ -187,18 +187,6 @@ MAIMAI_LOGS=/path/to/logs bash tests/run_all.sh
 | `dump_sigs.cs` | 用 Mono.Cecil 打印某个 dll 里方法的真实签名（对比上游发布版用） |
 | `il.py` | 反汇编 `Assembly-CSharp.dll`（老工具，看方法实现用） |
 
-## steam-launcher/ —— 把 maimai 放进 Steam
-
-`client/MaimaiSteam.exe` 的来源：一个无窗口的小启动器，Steam 里加它当"非 Steam 游戏"，
-它自己完成 inject amdaemon + 环境变量那一套（不经过 cmd）、校验 amdaemon 真的起来了、
-失败自动重试，再陪到游戏退出，所以 Steam 全程显示"正在玩"、也没有多余黑框。
-被 Steam 拉起时它还会把注入交给计划任务，绕开"Steam 把 overlay 注进整棵进程树"导致
-`mai2hook.dll` 注入失败的问题（这是黑屏的根因）。
-
-源码 `launcher.cpp`（Win32，C++17）、编译脚本两个（`build.ps1` 用 MSVC；
-`build_wsl.sh` 用 zig 交叉编译，不需要装 VS）。
-根因证据、排查小开关、日志说明见 [`steam-launcher/README.md`](steam-launcher/README.md)。
-
 ## InStoreMatch.cs —— 「店内マッチング」客户端插件
 
 MelonLoader + Harmony 插件（C# 5 语法，Windows 自带 csc 就能编）。
