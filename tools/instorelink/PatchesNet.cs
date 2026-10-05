@@ -105,7 +105,7 @@ namespace InStoreLink
             // 上游是在轮询线程里直接调游戏方法的，我们挪到主线程来（见 LinkRuntime 注释）。
             try
             {
-                PatchesParty.FlushPendingRecruits();
+                PatchesParty.ReconcileRecruits();
             }
             catch (Exception ex)
             {

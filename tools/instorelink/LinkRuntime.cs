@@ -59,14 +59,6 @@ namespace InStoreLink
         public static int MusicIdSum;
         public static bool SideMessageFlag;
 
-        /// <summary>
-        /// 轮询线程拿到的"新开房 / 已关房"，先排队，等主线程来取。
-        /// 上游是直接在轮询线程里调游戏的 RecvStartRecruit —— 那是跨线程改游戏状态，
-        /// 我们改成排队 + 主线程分发（见 PatchesParty.FlushPendingRecruits）。
-        /// </summary>
-        public static readonly ConcurrentQueue<RecruitInfo> PendingStarts = new ConcurrentQueue<RecruitInfo>();
-        public static readonly ConcurrentQueue<RecruitInfo> PendingFinishes = new ConcurrentQueue<RecruitInfo>();
-
         private static bool _checkAuthCalled;
         private static bool _isInit;
         private static int _lastRoomCount = -1;   // 只在房间数变化时打日志，免得刷屏
@@ -243,36 +235,9 @@ namespace InStoreLink
                     if (record != null && record.RecruitInfo != null) current.Add(record.RecruitInfo);
                 }
 
-                // 关掉的房间 → 排队，交给主线程喂回游戏
-                List<string> nowIds = current.Select(Identity).ToList();
-                List<string> gone = LastRecruits.Keys.Where(k => !nowIds.Contains(k)).ToList();
-                foreach (string key in gone)
-                {
-                    try
-                    {
-                        RecruitInfo old = LastRecruits[key];
-                        if (old == null) continue;
-                        PendingFinishes.Enqueue(old);
-                    }
-                    catch (Exception ex)
-                    {
-                        LinkLog.Error("处理关房 " + key + " 失败：" + ex.Message);
-                    }
-                }
-
-                // 新出现的房间 → 排队
-                foreach (RecruitInfo info in current)
-                {
-                    try
-                    {
-                        PendingStarts.Enqueue(info);
-                    }
-                    catch (Exception ex)
-                    {
-                        LinkLog.Error("处理开房失败：" + ex.Message);
-                    }
-                }
-
+                // 只更新快照，不在这里往游戏里塞东西：
+                // 上游是"每轮把每个房间都重新喂一遍游戏"，游戏每次都当成新招募 → 每 10 秒响一次提示音。
+                // 现在改成主线程对账（PatchesParty.ReconcileRecruits）：游戏缺哪个才补哪个。
                 Dictionary<string, RecruitInfo> snapshot = new Dictionary<string, RecruitInfo>();
                 foreach (RecruitInfo info in current) snapshot[Identity(info)] = info;
                 LastRecruits = snapshot;

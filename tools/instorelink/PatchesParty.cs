@@ -35,6 +35,8 @@ namespace InStoreLink
         private static MethodInfo _recvFinishRecruit;
         private static Client _gameClient;
         private static bool _reflectionWarned;
+        private static float _nextReconcile;
+        private static readonly Dictionary<string, float> _deliveredAt = new Dictionary<string, float>();
 
         // ------------------------------------------------------------ 招募列表
 
@@ -49,14 +51,21 @@ namespace InStoreLink
         }
 
         /// <summary>
-        /// 主线程分发：把轮询线程排队的新房间/关房喂给游戏本体。
-        /// 由 CommonMonitor.ViewUpdate 的 Postfix 每帧调用（见 PatchesNet）。
+        /// 主线程对账：拿大厅快照和游戏现在认得的房间比一比，缺的补、多的删。
+        /// 由 CommonMonitor.ViewUpdate 的 Postfix 每帧调用（见 PatchesNet），内部限流 0.5 秒一次。
+        ///
+        /// 为什么不是"每轮把列表整体重喂一遍"（上游的做法）：游戏会把每条 StartRecruit
+        /// 当成"有人开新房"来提示 —— 于是每 10 秒响一次提示音。这里改成只在游戏里
+        /// **确实缺这个房间**时才补一次（并且 10 秒内不重复补，防止游戏还没收下就反复补）。
         /// </summary>
-        public static void FlushPendingRecruits()
+        public static void ReconcileRecruits()
         {
             Client client = _gameClient;
             if (client == null) return;
-            if (LinkRuntime.PendingStarts.IsEmpty && LinkRuntime.PendingFinishes.IsEmpty) return;
+
+            // 限流：每帧做一次列表对账没必要
+            if (UnityEngine.Time.time < _nextReconcile) return;
+            _nextReconcile = UnityEngine.Time.time + 0.5f;
 
             if (_recvStartRecruit == null)
                 _recvStartRecruit = typeof(Client).GetMethod("RecvStartRecruit",
@@ -65,8 +74,7 @@ namespace InStoreLink
                 _recvFinishRecruit = typeof(Client).GetMethod("RecvFinishRecruit",
                     BindingFlags.NonPublic | BindingFlags.Instance);
 
-            // 反射都拿不到的话，房间根本没法喂回游戏。这里直接返回、把队列留着，
-            // 免得像"先出队再 break"那样把事件一条条丢掉。
+            // 反射都拿不到的话，房间根本没法喂回游戏
             if (_recvStartRecruit == null || _recvFinishRecruit == null)
             {
                 if (!_reflectionWarned)
@@ -78,18 +86,94 @@ namespace InStoreLink
                 return;
             }
 
-            RecruitInfo info;
-            while (LinkRuntime.PendingFinishes.TryDequeue(out info))
+            IManager manager = LinkRuntime.PartyMan;
+            if (manager == null) return;
+            Dictionary<string, RecruitInfo> want = LinkRuntime.LastRecruits;
+            if (want == null) return;
+
+            List<RecruitInfo> have = manager.GetRecruitListWithoutMe();
+            if (have == null) have = new List<RecruitInfo>();
+
+            // 1) 大厅里有、游戏里没有 → 补进去
+            foreach (KeyValuePair<string, RecruitInfo> kv in want)
             {
-                Packet packet = new Packet(info.IpAddress);
-                packet.encode(new FinishRecruit(info));
-                _recvFinishRecruit.Invoke(client, new object[] { packet });
+                RecruitInfo room = kv.Value;
+                if (room == null) continue;
+                // 自己的房间不用喂回自己
+                if (IsMyOwnRoom(room)) continue;
+                if (ContainsRoom(have, room)) continue;
+
+                float last;
+                if (_deliveredAt.TryGetValue(kv.Key, out last) &&
+                    UnityEngine.Time.time - last < 10f) continue;      // 刚喂过，等游戏收下
+
+                try
+                {
+                    Packet packet = new Packet(room.IpAddress);
+                    packet.encode(new StartRecruit(room));
+                    _recvStartRecruit.Invoke(client, new object[] { packet });
+                    _deliveredAt[kv.Key] = UnityEngine.Time.time;
+                    LinkLog.Debug("补一个房间进游戏：" + kv.Key);
+                }
+                catch (Exception ex)
+                {
+                    LinkLog.Error("补房间失败 " + kv.Key + "：" + ex.Message);
+                }
             }
-            while (LinkRuntime.PendingStarts.TryDequeue(out info))
+
+            // 2) 游戏里有、大厅里已经没有 → 从游戏里去掉
+            foreach (RecruitInfo room in have)
             {
-                Packet packet = new Packet(info.IpAddress);
-                packet.encode(new StartRecruit(info));
-                _recvStartRecruit.Invoke(client, new object[] { packet });
+                if (room == null) continue;
+                string id = LinkRuntime.Identity(room);
+                if (want.ContainsKey(id)) continue;
+                try
+                {
+                    Packet packet = new Packet(room.IpAddress);
+                    packet.encode(new FinishRecruit(room));
+                    _recvFinishRecruit.Invoke(client, new object[] { packet });
+                    _deliveredAt.Remove(id);
+                    LinkLog.Debug("房间已关，从游戏里去掉：" + id);
+                }
+                catch (Exception ex)
+                {
+                    LinkLog.Error("去掉房间失败 " + id + "：" + ex.Message);
+                }
+            }
+        }
+
+        private static bool ContainsRoom(List<RecruitInfo> list, RecruitInfo room)
+        {
+            string id = LinkRuntime.Identity(room);
+            foreach (RecruitInfo r in list)
+            {
+                if (r == null) continue;
+                if (LinkRuntime.Identity(r) == id) return true;
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// 这个房间是不是我自己开的？（RecruitInfo.IpAddress 是游戏自己的 IpAddress 结构，
+        /// 所以按原始字节比，别拿 uint 直接比 —— 类型不同，编译不过。）
+        /// </summary>
+        private static bool IsMyOwnRoom(RecruitInfo room)
+        {
+            if (LinkRuntime.Client == null) return false;
+            try
+            {
+                byte[] mine = LinkStub.ToIp(LinkRuntime.Client.StubIp).GetAddressBytes();
+                byte[] theirs = room.IpAddress.GetAddressBytes();
+                if (theirs == null || theirs.Length != mine.Length) return false;
+                for (int i = 0; i < theirs.Length; i++)
+                {
+                    if (theirs[i] != mine[i]) return false;
+                }
+                return true;
+            }
+            catch (Exception)
+            {
+                return false;
             }
         }
 
