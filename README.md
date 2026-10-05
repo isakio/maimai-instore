@@ -4,28 +4,52 @@
 [![License: MIT](https://img.shields.io/github/license/isakio/maimai-instore)](LICENSE)
 [![公共大厅](https://img.shields.io/badge/%E5%85%AC%E5%85%B1%E5%A4%A7%E5%8E%85-isakio.cn%3A20100-blue)](http://isakio.cn:20100)
 
-[NyanLink](https://github.com/MuNET-OSS/NyanLink)（上游是 [MewoLab/worldlinkd](https://github.com/MewoLab/worldlinkd)）给
-maimai DX 提供了 C2C 联机。本仓库是给它的**配套工具**：一个客户端插件，让选曲界面
-底部的「店内マッチング」直接可用；另外附一份自研的大厅 + 中继服务端（协议兼容，零依赖）。
+让 maimai DX 的「店内マッチング」能跨公网联机的一套东西：**一个客户端 mod + 一份自研的
+大厅/中继服务端**。两台不在同一个局域网里的机子，装完就能在选曲界面互相看到、进同一个房间、
+一起打。
 
-> **和 NyanLink 的关系**：这不是它的分支 —— 但它**配套**它，服务端也是照着它的协议**重写**的：
+> **为什么会有自己的客户端 mod**：这条路最早是
+> [NyanLink](https://github.com/MuNET-OSS/NyanLink)（上游
+> [MewoLab/worldlinkd](https://github.com/MewoLab/worldlinkd)）打开的 —— 它的客户端 mod
+> 把游戏本体的局域网 party 换成了走公网中继的隧道。但它后来不太动了，所以本仓库现在
+> **自己重写了一个协议兼容的客户端 mod（`InStoreLink`）**，不再分发上游的二进制：
 >
-> - `InStoreMatch` 是独立的 MelonLoader 插件，Harmony 补丁全部打在**游戏本体**
->   （`Assembly-CSharp`）上，完全不碰 NyanLink 的 mod；
-> - `instorematchd` 是**重新实现**的大厅 + 中继（Python，零依赖），目标是不改 NyanLink 客户端
->   一行就能连 —— 消息格式、命令号、伪 IP 算法都是从它的客户端 mod **逆向**出来的；
-> - NyanLink 的客户端 mod（`WorldLink.dll`）在 [`client/`](client/) 里**原样带了一份**，
->   方便一次装完 —— 它的代码不是我们的，出处与许可见
->   [`third_party/NyanLink/`](third_party/NyanLink/README.md)（也可以直接去
->   [官方 release](https://github.com/MuNET-OSS/NyanLink/releases) 下载）。
+> - **`InStoreLink`** —— 客户端 mod（C# / MelonLoader + Harmony）：注册中继、心跳、
+>   影子 socket、开房走 HTTP 大厅、把对方的房间喂回游戏本体。线协议与上游**逐字节兼容**，
+>   所以两边一家用我们这份、一家用上游那份也能连；
+> - **`InStoreMatch`** —— 客户端插件：让选曲界面真的**画出**「店内マッチング」那一格
+>   （游戏只在进界面时给分类栏拍一次快照，联机分类是之后才出现的）；
+> - **`instorematchd`** —— 大厅 + 中继服务端（Python，零依赖），协议同样兼容上游。
 >
-> License 都是 MIT（沿革：`MewoLab/worldlinkd` → `Japerz12138/worldlinkd` → `MuNET-OSS/NyanLink`）。
+> 代码是我们写的，但**协议与大量游戏侧机制来自上游的逆向成果**：署名（MIT，
+> Copyright (c) 2025 Azalea）与出处保留在 [`third_party/NyanLink/`](third_party/NyanLink/README.md)，
+> 完整的协议规格、上游源码导读、与游戏本体的 33 个耦合点都在
+> [`docs/客户端mod实现.md`](docs/客户端mod实现.md)。
+> 想用"直接跑上游二进制"的老方案，看分支
+> [`legacy-worldlink`](https://github.com/isakio/maimai-instore/tree/legacy-worldlink)。
 
 **只想玩？** 我们有一台已经跑着的大厅 `http://isakio.cn:20100` —— 去
-[**最新 Release**](https://github.com/isakio/maimai-instore/releases/latest) 下载
-`InStoreMatch.dll`，照着下面的「方式 A」做就行。想自己开一台，看「方式 B」。
+[**最新 Release**](https://github.com/isakio/maimai-instore/releases/latest) 拿两个 dll，
+照着下面的「方式 A」做就行。想自己开一台看「方式 B」。
 
 ## 它是怎么工作的
+
+游戏本体的「店内マッチング」是**局域网 party**：同店的几台机子通过 `Manager.Party.Party`
+互相发现、互连 socket。跨公网联机的做法是把这条链路整个换掉：
+
+```
+ 游戏本体 ── Send/Receive ──► InStoreLink 的影子 socket ──► 中继 :20101 ──► 对面
+      ▲                                                      ▲
+      └── 开房/关房改成 POST /recruit/start|finish ──► 大厅 :20100 ─┘
+          房间列表每 10 秒 GET /recruit/list 拉一次
+```
+
+`InStoreLink.dll` 干的就是这一层（它替代了上游的 `WorldLink.dll`，协议完全一致）：
+把"本机 IP"换成 `md5(keychip)` 算出的**伪 IP**、把游戏的 party 包转成一行行文本消息走中继、
+顺便关掉包加密（隧道里跑明文，服务端不用知道密钥）。详细规格见
+[`docs/客户端mod实现.md`](docs/客户端mod实现.md)。
+
+而 `InStoreMatch.dll` 解决的是另一半问题：
 
 游戏本体的选曲界面里，底部那排分类标签（`Monitor.MusicSelectMonitor._genreTabController`
 → `.SelectorTab._tabDatas`）**只在进入界面时拍一次快照**。联机用的 198 号分类
@@ -49,23 +73,33 @@ maimai DX 提供了 C2C 联机。本仓库是给它的**配套工具**：一个�
 
 ```
 ├── client/                        ← 装客户端要的东西全在这儿
-│   ├── WorldLink.dll              ← NyanLink 官方构建（原样收录，50176 字节）
-│   ├── InStoreMatch.dll           ← 本仓库的客户端插件（v2.5，SDEZ 1.70）
-│   └── install-instorematch.ps1   ← 一条命令：拷这两个 dll + 写 WorldLink.toml
+│   ├── InStoreLink.dll            ← 联机 mod（v0.1，替代上游 WorldLink.dll）
+│   ├── InStoreMatch.dll           ← 让「店内マッチング」那一格画出来（v2.5）
+│   └── install.ps1                ← 一条命令：拷两个 dll + 停用旧的 + 写 InStoreLink.toml
 ├── tools/
-│   ├── InStoreMatch.cs            ← 客户端插件源码（MelonLoader + Harmony，C# 5）
-│   ├── build_instorematch.ps1     ← 用 Windows 自带 csc.exe 编译，不需要装 SDK
-│   ├── il.py                      ← 反汇编 Assembly-CSharp.dll 的小工具
+│   ├── instorelink/*.cs           ← InStoreLink 源码（C# 5，11 个文件，零第三方依赖）
+│   ├── build_instorelink.ps1      ← 用 Windows 自带 csc.exe 编译，不需要装 SDK
+│   ├── build_wsl.sh               ← 在 WSL 里编译（借用 Windows 的 csc.exe）
+│   ├── InStoreMatch.cs            ← InStoreMatch 源码（单文件）
+│   ├── build_instorematch.ps1     ← 编译 InStoreMatch
+│   ├── check_patch_params.cs      ← 检查补丁参数名（Harmony 是按名字传参的）
+│   ├── il.py / find_type.py / dump_sigs.cs  ← 读游戏程序集的小工具
 │   ├── fake_player.py             ← 假玩家：不用真人就能测招募/进房
 │   └── README.md                  ← 插件内部逻辑、四个开关、踩过的坑
+├── tests/                         ← 测试：协议单测 / 向量 / 端到端 / 兼容探针 / 参数名
+│   ├── run_all.sh                 ← 一键跑全部（6 步）
+│   ├── ProtocolTests.cs           ← 协议层单测（不依赖游戏，能单独编出来跑）
+│   ├── GameCompatProbe.cs         ← 游戏兼容性探针（补丁目标 / 注入字段）
+│   └── py/                        ← 协议模型、真实日志反验、端到端
 ├── instorematchd/                 ← 自研联机服务端（大厅 + 中继，Python 标准库，零依赖）
 │   ├── install.sh                 ← 一键装（systemd）
 │   ├── Dockerfile / docker-compose.yml
 │   ├── test_protocol.py           ← 协议自测
 │   └── README.md                  ← 部署步骤、参数、升级、卸载
-├── third_party/NyanLink/          ← client/WorldLink.dll 的出处与 MIT 许可
+├── third_party/NyanLink/          ← 上游的 MIT 许可与出处（协议来源说明）
 └── docs/
-    ├── 技术笔记.md              ← ★ 实现细节与调试过程（反汇编证据都在这里）
+    ├── 客户端mod实现.md         ← ★ 协议规格 + 上游源码导读 + 与游戏本体的耦合点
+    ├── 技术笔记.md              ← 实现细节与调试过程（反汇编证据都在这里）
     ├── 双人联机配置清单.md       ← 给玩家看的完整配置步骤
     └── 给朋友看-安装步骤.md      ← 可以直接转发给搭子的简版说明
 ```
@@ -80,19 +114,24 @@ maimai DX 提供了 C2C 联机。本仓库是给它的**配套工具**：一个�
 
 **1. 放两个 mod 到 `<游戏目录>\Mods\`**
 
-| 文件 | 从哪来 |
-| --- | --- |
-| `WorldLink.dll` | 本仓库 [`client/WorldLink.dll`](client/WorldLink.dll)（NyanLink 官方构建，原样收录：50176 字节 / md5 `9dfa62d5cba41deac0c2c74334ef8371`；出处与许可见 [`third_party/NyanLink/`](third_party/NyanLink/)） |
-| `InStoreMatch.dll` | 本仓库 [`client/InStoreMatch.dll`](client/InStoreMatch.dll)（v2.5，18432 字节 / md5 `1a94a9b6be9b03bfb274e41b0a8256b3`） |
+| 文件 | 干什么 | 校验 |
+| --- | --- | --- |
+| [`client/InStoreLink.dll`](client/InStoreLink.dll) | 联机本体：注册中继、开房、把对方的房间喂回游戏 | v0.1，47616 字节 / md5 `62319f50b7051944315e472f1b84aa55` |
+| [`client/InStoreMatch.dll`](client/InStoreMatch.dll) | 让选曲界面画出「店内マッチング」那一格 | v2.5，18432 字节 / md5 `1a94a9b6be9b03bfb274e41b0a8256b3` |
 
 两个文件都在本仓库的 [`client/`](client/) 里（[最新 Release](https://github.com/isakio/maimai-instore/releases/latest) 也附了），不用再去别的地方下。
 
-**2. 在游戏根目录（`Sinmai.exe` 那一层）放 `WorldLink.toml`**
+> 如果你 `Mods\` 里还有以前那份 `WorldLink.dll`，**必须先删掉**：它和 `InStoreLink.dll`
+> 补丁目标重叠，两个一起跑会把补丁打两遍。我们的安装脚本会自动把它改名停用。
+
+**2. 在游戏根目录（`Sinmai.exe` 那一层）放 `InStoreLink.toml`**
 
 ```toml
 LobbyUrl="http://isakio.cn:20100"
 Debug=false
 ```
+
+（老的 `WorldLink.toml` 也认 —— 找不到 `InStoreLink.toml` 时会回退用它，所以升级不用改名。）
 
 **3. 装了 AquaMai 的话**，把 `AquaMai.toml` 里这一段改成：
 
@@ -106,31 +145,37 @@ Disabled = true
 **4. 进 Test 模式设两项**：按住 `F1` → `ゲーム設定` →
 `店内マッチングの設定` = **ON**，`グループ内基準機の設定` = **基準機**，然后重启游戏。
 
-上面 1~2 步可以一条命令做完（脚本会用仓库里的 `client/InStoreMatch.dll`）：
+上面 1~2 步可以一条命令做完（脚本会用仓库里的两个 dll，并把旧的 `WorldLink.dll` 改名停用）：
 
 ```powershell
 git clone https://github.com/isakio/maimai-instore.git
 cd maimai-instore
-powershell -ExecutionPolicy Bypass -File .\client\install-instorematch.ps1
+powershell -ExecutionPolicy Bypass -File .\client\install.ps1
 ```
 
 脚本会自己找游戏目录；找不到会提示你把文件夹拖进窗口，也可以直接指定：
 `-GameDir "<游戏根目录，就是 Sinmai.exe 那一层>"`。
 
-它会顺手把大厅地址写进 `<游戏根目录>\WorldLink.toml`，默认就是我们的公共大厅
+它会顺手把大厅地址写进 `<游戏根目录>\InStoreLink.toml`，默认就是我们的公共大厅
 `http://isakio.cn:20100` —— **不自己搭服务器的话，这个参数根本不用管**。
 只有你自己搭了大厅（见「方式 B」）时，才在命令最后多给一个参数改掉它。
 
 不想 clone 的话：从 [Release](https://github.com/isakio/maimai-instore/releases/latest)
-把两个 dll 下下来手动拷进 `Mods\`，再自己写那个 `WorldLink.toml` 也一样。
+把两个 dll 下下来手动拷进 `Mods\`，再自己写那个 `InStoreLink.toml` 也一样。
 
 **验收**：`MelonLoader\Logs\Latest.log` 里应该有
 
 ```
-[NyanLink] WorldLink server address: isakio.cn:20101
+[InStoreLink] InStoreLink 0.1.0 已加载（配置 InStoreLink.toml，大厅 http://isakio.cn:20100，详细日志 关）
+[InStoreLink]   ✓ PreCheckAuth → OperationManager.CheckAuth_Proc
+...（一共 33 行“✓ 补丁名 → 目标方法”）
+[InStoreLink] 挂钩完成，共 33 条生效
+[InStoreLink] 已连接中继 isakio.cn:20101（本机伪 IP ...）
 [InStoreMatch] v2.5 已加载（...）
 [InStoreMatch] 挂钩成功: reinputConnectCombineData ...（共 7 行“挂钩成功”）
 ```
+
+（`Debug=true` 时还会打心跳和每个包；排查问题的时候再开。）
 
 ### 方式 B：自己搭服务器（不想连我那台，或者想开给一群人）
 
@@ -161,17 +206,17 @@ HOST_OVERRIDE=203.0.113.10 docker compose up -d --build
 
 ```powershell
 # 装的时候直接给参数（推荐）
-powershell -ExecutionPolicy Bypass -File .\client\install-instorematch.ps1 `
+powershell -ExecutionPolicy Bypass -File .\client\install.ps1 `
     -LobbyUrl "http://203.0.113.10:20100"
 ```
 
-或者装完之后手动改 `<游戏根目录>\WorldLink.toml`：
+或者装完之后手动改 `<游戏根目录>\InStoreLink.toml`：
 
 ```toml
 LobbyUrl="http://203.0.113.10:20100"
 ```
 
-> `-LobbyUrl` 就是"大厅地址"这个参数本身；而 `WorldLink.toml` 才是游戏真正读的配置文件
+> `-LobbyUrl` 就是"大厅地址"这个参数本身；而 `InStoreLink.toml` 才是游戏真正读的配置文件
 > （安装脚本只是帮你把它写出来而已）。
 
 > `--host-override`（脚本第一个参数）必须填**客户端能访问到的地址**：`/info` 会把它
@@ -219,12 +264,15 @@ sudo IMD_ADMIN_TOKEN='你的token' bash instorematchd/install.sh <你的域名�
 
 ## 鸣谢
 
-- [MuNET-OSS/NyanLink](https://github.com/MuNET-OSS/NyanLink) —— 协议与客户端 mod
+- [MuNET-OSS/NyanLink](https://github.com/MuNET-OSS/NyanLink) —— 协议与客户端 mod 的最初实现，
+  我们的 `InStoreLink` / `instorematchd` 都是照着它逆向重写的
 - [MewoLab/worldlinkd](https://github.com/MewoLab/worldlinkd) —— NyanLink 的上游
 
 ## License
 
-- **我们自己的部分**（`tools/`、`instorematchd/`、`client/InStoreMatch.dll`、文档）：MIT，见 [LICENSE](LICENSE)。
-- **`client/WorldLink.dll`**：这是 NyanLink 的构建产物，我们原样收录、没有改动。
-  它遵循 NyanLink 自己的 MIT 许可，版权归其作者（Copyright (c) 2025 Azalea）；
-  许可全文与出处说明在 [`third_party/NyanLink/`](third_party/NyanLink/README.md)。
+- **本仓库的全部内容**（`tools/`、`tests/`、`instorematchd/`、`client/` 下的两个 dll、文档）：
+  MIT，见 [LICENSE](LICENSE)。本仓库**不再分发任何第三方二进制**。
+- **`client/InStoreLink.dll` 与 `instorematchd`**：是我们自己的实现，但**协议与大量游戏侧机制
+  来自 [NyanLink](https://github.com/MuNET-OSS/NyanLink) 的逆向成果**，属于衍生作品 ——
+  按它的 MIT 许可保留署名（Copyright (c) 2025 Azalea），出处说明见
+  [`third_party/NyanLink/`](third_party/NyanLink/README.md)。

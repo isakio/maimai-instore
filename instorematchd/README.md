@@ -135,14 +135,16 @@ sudo userdel instorematchd
 ## 说明
 
 服务端只负责**大厅列表 + 中继转发**，它不参与游戏画面的任何事。
-客户端那边要装本仓库的 [`client/InStoreMatch.dll`](../client/InStoreMatch.dll)
-（源码在 [`tools/InStoreMatch.cs`](../tools/InStoreMatch.cs)），它负责把选曲界面
-底部的「店内マッチング」那一格画出来。
+客户端那边要装两个东西：[`client/InStoreLink.dll`](../client/InStoreLink.dll)（联机本体，
+源码在 [`tools/instorelink/`](../tools/instorelink/)）负责把游戏本体的局域网 party 接到这条
+隧道上；[`client/InStoreMatch.dll`](../client/InStoreMatch.dll)（源码在
+[`tools/InStoreMatch.cs`](../tools/InStoreMatch.cs)）负责把选曲界面底部的
+「店内マッチング」那一格画出来。
 
 排查时它可以帮你**看清数据流**：打开看板，如果对方开房时「当前房间」里出现了记录、
 「在线玩家」里两个人都亮着，就说明服务端这边一切正常。
 （别人看公开看板看到的是打码后的 keychip / IP；你自己带 token 看 `/admin` 才是全量。）
 
 **人数上限不在服务端**：大厅和中继对人数没有限制（任意两个客户端之间都能建流）。
-实际最多只能两个人一起玩，是因为客户端 mod（NyanLink 的 `WorldLink.dll`）是
+实际最多只能两个人一起玩，是因为客户端 mod（`InStoreLink`，上游的 `WorldLink` 也一样）是
 「ふたり」实现，只认一个对端 —— 详见仓库根目录 README 的「已知问题」。

@@ -111,6 +111,69 @@ pkill -f fake_player.py
 注意 `--keychip` 必须和真客户端的 keychip 不同（默认 `W8888888888` 够用），
 `--music-id` 要选对方游戏里有的曲子。
 
+## instorelink/ —— 联机本体（客户端 mod）
+
+把游戏本体的「局域网 party」接到公网中继上的那个 mod。**它替代了上游 NyanLink 的
+`WorldLink.dll`**，协议逐字节兼容（所以两边一家用我们这份、一家用上游那份也能连），
+但代码是我们自己写的：零第三方依赖、能直接用 Windows 自带的 `csc.exe` 编（C# 5）。
+
+完整的协议规格、上游源码导读、与游戏本体的 33 个耦合点、踩过的坑，都在
+[`docs/客户端mod实现.md`](../docs/客户端mod实现.md)。这里只说怎么改、怎么测。
+
+| 文件 | 干什么 |
+| --- | --- |
+| `LinkProtocol.cs` | 线协议编解码（17 字段）、命令号、伪 IP 算法。**不依赖 Unity/游戏，能单独抽出来单测** |
+| `LinkConfig.cs` | 读 `InStoreLink.toml`（也认老的 `WorldLink.toml`），30 行的极简 TOML |
+| `LinkClient.cs` | 中继 TCP 连接：注册、心跳、收发线程、四个队列、重连、延迟统计 |
+| `LinkSocket.cs` | 影子 socket：把游戏 `NFSocket` 的每个调用转成中继消息 |
+| `LinkLobby.cs` | 大厅 HTTP（`/info` `/online` `/recruit/list` `/recruit/start|finish`） |
+| `LinkRuntime.cs` | 全局状态：配置、连接、招募列表轮询、"新房间排队等主线程" |
+| `PatchesNet.cs` | 通信层 26 个补丁（NFSocket 全量、开房走 HTTP、关加解密、跳过联网自检、状态显示） |
+| `PatchesParty.cs` | 招募/选曲 7 个补丁（拉列表、判断能否进房、重画联机歌曲列表） |
+| `LinkPatching.cs` | **逐条挂补丁**：哪条挂不上会点名，不会因为一条失败就整组不挂 |
+| `LinkMod.cs` | MelonLoader 入口：读配置 → 挂补丁 → 退出时收尾 |
+| `LinkLog.cs` | 日志（Debug 开关） |
+
+编译（Windows，和 InStoreMatch 同一套路，不需要 .NET SDK）：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tools\build_instorelink.ps1 `
+    -Game "D:\game\maimai\SDEZ1.70\Package"
+# 产物：<游戏目录>\Mods\InStoreLink.dll
+```
+
+在 WSL 里编（借用 Windows 的 csc.exe）：
+
+```bash
+bash tools/build_wsl.sh [游戏目录]           # 产物 build/InStoreLink.dll
+```
+
+改完之后**先跑测试再进游戏**（游戏里的错误要重启一次游戏才能看到，很费时间）：
+
+```bash
+bash tests/run_all.sh          # 6 步：编译 / 协议单测 / 向量 / 端到端 / 兼容探针 / 参数名
+bash tests/run_param_check.sh  # 只查补丁参数名（秒级，改完补丁先跑这个）
+```
+
+### 改这个 mod 最容易踩的两个坑
+
+1. **Harmony 是按参数名给补丁传参的**（只有 `__instance` / `__result` / `___字段` 是特殊名字）。
+   把游戏里的 `NFSocket(Socket nfSocket)` 写成 `socket`，编译零提示，运行时抛
+   `Parameter "socket" not found ...`，而 Harmony 只报一句
+   `IL Compile Error (unknown location)` —— 所以有 `tools/check_patch_params.cs` 自动查。
+2. **注入的私有字段类型必须一致**（`___字段名` 写法），比如
+   `MusicSelectProcess._currentPlayerSubSequence` 的元素类型是它自己嵌套的 `SubSequence`，
+   不是 `Process.SubSequence`。`tests/GameCompatProbe.cs` 会把这些字段的真实类型打出来。
+
+配套的小工具：
+
+| 工具 | 用途 |
+| --- | --- |
+| `check_patch_params.cs` | 补丁参数名 / 目标方法逐个对照（`tests/run_param_check.sh` 用它） |
+| `find_type.py` | 在 `Assembly-CSharp.dll` 里按名字查类型落哪个命名空间 |
+| `dump_sigs.cs` | 用 Mono.Cecil 打印某个 dll 里方法的真实签名（对比上游发布版用） |
+| `il.py` | 反汇编 `Assembly-CSharp.dll`（老工具，看方法实现用） |
+
 ## InStoreMatch.cs —— 「店内マッチング」客户端插件
 
 MelonLoader + Harmony 插件（C# 5 语法，Windows 自带 csc 就能编）。

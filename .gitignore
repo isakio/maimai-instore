@@ -5,9 +5,12 @@ __pycache__/
 # 编译产物 / 打包文件（client/ 下这两份是我们特意收进库的，要放行）
 *.dll
 !client/InStoreMatch.dll
-!client/WorldLink.dll
+!client/InStoreLink.dll
 *.zip
 *.pdb
+
+# 本地构建目录（编译中间产物，不进库）
+build/
 
 # 日志与截图（含个人信息，不要入库）
 logs/
