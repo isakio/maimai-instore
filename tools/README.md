@@ -190,13 +190,14 @@ MAIMAI_LOGS=/path/to/logs bash tests/run_all.sh
 ## steam-launcher/ —— 把 maimai 放进 Steam
 
 `client/MaimaiSteam.exe` 的来源：一个无窗口的小启动器，Steam 里加它当"非 Steam 游戏"，
-它内部隐藏窗口跑 `start-steam.bat`（= inject amdaemon + 环境变量，带"起来了吗"校验和重试），
-再陪到游戏退出，所以 Steam 全程显示"正在玩"、也没有多余黑框。
+它自己完成 inject amdaemon + 环境变量那一套（不经过 cmd）、校验 amdaemon 真的起来了、
+失败自动重试，再陪到游戏退出，所以 Steam 全程显示"正在玩"、也没有多余黑框。
+被 Steam 拉起时它还会把注入交给计划任务，绕开"Steam 把 overlay 注进整棵进程树"导致
+`mai2hook.dll` 注入失败的问题（这是黑屏的根因）。
 
-源码 `launcher.cpp`（Win32，C++17）、配套 `start-steam.bat`（ASCII）、编译脚本两个
-（`build.ps1` 用 MSVC；`build_wsl.sh` 用 zig 交叉编译，不需要装 VS）。
-为什么需要它、踩过哪些坑（比如 `inject` 不能放在隐藏窗口的同一条控制台里跑）见
-[`steam-launcher/README.md`](steam-launcher/README.md)。
+源码 `launcher.cpp`（Win32，C++17）、编译脚本两个（`build.ps1` 用 MSVC；
+`build_wsl.sh` 用 zig 交叉编译，不需要装 VS）。
+根因证据、排查小开关、日志说明见 [`steam-launcher/README.md`](steam-launcher/README.md)。
 
 ## InStoreMatch.cs —— 「店内マッチング」客户端插件
 

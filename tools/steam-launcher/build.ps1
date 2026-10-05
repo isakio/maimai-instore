@@ -35,5 +35,4 @@ finally {
 }
 
 Write-Host "BUILD OK -> $Out" -ForegroundColor Green
-Write-Host "Install: copy $Out and tools\steam-launcher\start-steam.bat next to Sinmai.exe," -ForegroundColor Cyan
 Write-Host "         then add the exe as a non-Steam game (start-in = that folder)." -ForegroundColor Cyan

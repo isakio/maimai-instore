@@ -98,14 +98,12 @@ foreach ($name in @("InStoreLink.dll", "InStoreMatch.dll")) {
     Write-Host "[OK] $name -> $dst" -ForegroundColor Green
 }
 
-# 可选：顺手装"Steam 启动器"（MaimaiSteam.exe + start-steam.bat，放游戏根目录）。
-# 不加进 Steam 也完全不影响正常游玩；仓库没带这两个文件时跳过。
+# 可选：顺手装"Steam 启动器"（MaimaiSteam.exe，放游戏根目录）。
+# 不加进 Steam 也完全不影响正常游玩；仓库没带这个文件时跳过。
 $steamExe = Join-Path $PSScriptRoot "MaimaiSteam.exe"
-$steamBat = Join-Path (Split-Path $PSScriptRoot -Parent) "tools\steam-launcher\start-steam.bat"
-if ((Test-Path $steamExe) -and (Test-Path $steamBat)) {
+if (Test-Path $steamExe) {
     Copy-Item $steamExe (Join-Path $GameDir "MaimaiSteam.exe") -Force
-    Copy-Item $steamBat (Join-Path $GameDir "start-steam.bat") -Force
-    Write-Host "[OK] Steam 启动器 -> $GameDir\MaimaiSteam.exe（+ start-steam.bat）" -ForegroundColor Green
+    Write-Host "[OK] Steam 启动器 -> $GameDir\MaimaiSteam.exe" -ForegroundColor Green
     Write-Host "     想在 Steam 里启动 maimai：添加非 Steam 游戏 -> 选这个 exe，起始位置填 $GameDir" -ForegroundColor DarkGray
     Write-Host "     （不改 Steam 也没关系，双击你原来的 start.bat 照常玩）" -ForegroundColor DarkGray
 } else {

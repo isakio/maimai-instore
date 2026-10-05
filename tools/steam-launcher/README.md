@@ -3,7 +3,8 @@
 目标：Steam 库里多一个「maimai DX」，点它就能进游戏，而且
 
 - 全程**没有多余的黑框**（不像直接把 `start.bat` 加进 Steam 那样挂一个命令行窗口）
-- Steam 全程显示"正在玩"，时长统计 / overlay / 手柄映射都正常
+- Steam 全程显示"正在玩"，时长统计正常
+- 不用改 Steam 的任何设置
 - 不动你原来的 `start.bat`
 
 ## 为什么不能直接把 Sinmai.exe 加进 Steam
@@ -15,38 +16,80 @@
 3. 有 `OPENSSL_ia32cap=:~0x20000000` 这个环境变量（新 CPU 上绕过 OpenSSL 崩溃）。
 
 这三件事全是 `start.bat` 干的 → 直接点 `Sinmai.exe` 只会**黑屏**（连不上"店内服务器"）。
-而直接把 `start.bat` 加进 Steam，又会全程挂一个 cmd 窗口。所以在中间放一个**无窗口的小 exe**：
+而直接把 `start.bat` 加进 Steam，又会全程挂一个 cmd 窗口。所以在中间放一个
+**无窗口的小 exe**（GUI 子系统，不经过 cmd、不创建任何窗口）：
 
 ```
-Steam ──► MaimaiSteam.exe（本目录编译出来的，GUI 子系统，无控制台）
-            │  自己把整套启动流程做完，全程不经过 cmd / 不创建任何窗口：
-            │  重复 3 轮：
-            │    重复 5 次：
-            │      inject.exe -d -k mai2hook.dll amdaemon.exe -f -c …
-            │      （输出抓进 inject-out.txt；卡住 20 秒就杀掉）
-            │      等 4 秒看 amdaemon.exe 是否活着 → 没起来就清干净再来
-            │    amdaemon 起来 → Sinmai.exe -monitor 2
-            │    15 秒后复查：游戏还在 + amdaemon 还在 → 判定成功，陪到游戏退出
-            │    否则（= 黑屏那种）杀干净、进入下一轮
-            └─ 游戏退出后 taskkill amdaemon.exe 收尾，然后自己退出
+Steam ──► MaimaiSteam.exe（Steam 只跟踪它 → "正在玩" / 时长统计）
+            │
+            ├ 若发现自己被 Steam 拉起来了（或 Steam 的 overlay 已注进自己）：
+            │    把"注入 amdaemon"交给计划任务跑（见下一节），那条链完全不在 Steam 的进程树里
+            │      MaimaiSteam.exe --inject-only
+            │        └ inject.exe -d -k mai2hook.dll amdaemon.exe -f -c …
+            │
+            ├ 等 amdaemon 真的起来（helper 用 _maimai-steam-inject.txt 回报，最多 35 秒）
+            ├ Sinmai.exe -monitor 2
+            ├ 15 秒后复查：游戏还在 + amdaemon 还在 → 判定成功，陪到游戏退出
+            │  （否则杀干净、重来一轮，最多 2 轮）
+            └ 游戏退出后 taskkill amdaemon.exe，删掉计划任务，然后自己退出
 ```
 
-> 早期版本是"launcher 跑 bat、bat 里 inject"，实测**从 Steam 启动时 inject 会连续失败**
-> （Steam 的 job 对象 + 控制台那一层），所以现在 inject 这一步由 exe 直接做，
-> 既避开了那层，也能把 inject 的真实输出抓下来（`inject-out.txt`）。
+## 关键结论：Steam 的 overlay 会把注入搞坏（根因）
 
-## 踩过的坑（改这个之前先看一眼）
+现象是：**从 Steam 启动时，放 mai2hook.dll 进 amdaemon 一次都没成功过**
 
-1. **`inject` 不能放在"隐藏窗口"的同一条控制台里直接跑**——实测会卡住或报
-   `mai2hook.dll: DLL failed to load inside target process`，然后 amdaemon 起不来、游戏黑屏。
-   必须像原版 `start.bat` 那样用 `start /min inject …`（另开一个最小化控制台）。
-2. **别用 VBS/`wscript` 当入口**：Windows 11 已经把 VBScript 标记为弃用
-   （事件日志里会出现 `VBScriptDeprecationAlert`），而且脚本宿主偶尔会报运行时错误弹框。
-3. **日志文件别一直开着**：launcher 早期版本把 `steam-launch.log` 一直 hold 住，
-   结果 bat 那边的 `>>` 写入全部静默失败（看起来像"bat 没跑"）。
-   现在 launcher 写 `maimaiDX.log`、bat 写 `steam-launch.log`，互不干扰。
-4. `inject` 偶发失败是这个环境的常态（原因没完全定位，和安全软件/时序都有关），
-   所以这套东西的核心不是"找出原因"，而是**校验 + 重试**：没起来就重来。
+```
+inject-out.txt:  mai2hook.dll: DLL failed to load inside target process
+```
+
+而**同一份 exe**、同一台机器，从资源管理器/WSL 手动跑，1 秒内就成功。查下来的结论：
+
+1. **Steam 会把它的 overlay 注进"它启动的那棵进程树"里的每一个进程。**
+   `D:\game\steam\logs\gameoverlay_renderer.txt` 里留着实锤 —— 连我们随手
+   `taskkill.exe` 一下都被注进去了：
+
+   ```
+   Mon Oct 05 07:58:32 2026 UTC - Current process: taskkill.exe
+   Mon Oct 05 07:58:32 2026 UTC - Module file name: D:\game\steam\gameoverlayrenderer64.dll
+   ```
+
+2. `amdaemon.exe` 是 `inject.exe` 在**那棵树里面**创建的，创建的一瞬间
+   `gameoverlayrenderer64.dll` 就被塞进去了 —— 和 inject 的远程 `LoadLibrary`
+   撞在一起，于是 `LoadLibrary(mai2hook.dll)` 返回失败、amdaemon 立刻退出 →
+   游戏黑屏（就是你看到的那句报错）。
+
+3. 已经排除的原因（都实测过，别再重复验证）：
+
+   | 怀疑 | 实测结果 |
+   | --- | --- |
+   | Steam 的 job 对象限制 | `CREATE_BREAKAWAY_FROM_JOB` 明确生效（子进程已在 job 外），照样失败 |
+   | 提权差异 | 两种情况下 `TokenIsElevated` 都是 no |
+   | 兼容性 shim | `__COMPAT_LAYER` 都是 unset |
+   | `SteamAppId` 等环境变量 | 清掉照样失败；手动把同样的变量喂给 launcher 照样成功 |
+   | 工作目录 / PATH / Y: 盘 | 两份日志完全一致 |
+
+## 怎么解决
+
+**把"注入"这一步挪出 Steam 的进程树。** launcher 检测到自己是被 Steam 拉起来的
+（`SteamAppId` / `SteamClientLaunch` 有值）或 Steam 的 overlay 已经在本进程里，
+就用 `schtasks` 起一个 `MaimaiSteam.exe --inject-only`：
+
+```
+schtasks /create /tn MaimaiSteamInject /tr "\"<游戏目录>\MaimaiSteam.exe\" --inject-only" /sc once /st 00:00 /f
+schtasks /run    /tn MaimaiSteamInject
+```
+
+计划任务的父进程是 `svchost`（任务计划服务），**不是** Steam 跟踪的任何进程，
+所以 overlay 不会进去，amdaemon 就是干净的 —— 和手动跑 `start.bat` 一模一样。
+helper 干完活会在游戏目录写一行 `_maimai-steam-inject.txt`（`ok` / `failed`），
+launcher 收到 `ok` 才启动游戏，用完把计划任务删掉。
+
+### 另一条同样有效的路（可选）
+
+把这个快捷方式的 Steam 覆盖层关掉也能解决（Steam 就不会往树里注入）：
+**库里右键 `maimai DX` → 属性 → 常规 → 取消勾选「启用 Steam 界面」**。
+launcher 在"有 overlay"和"没有 overlay"两种情况下都能正常工作，所以这一步可选；
+真机验证时它是我们定位根因用的对照组。
 
 ## 编译
 
@@ -79,10 +122,8 @@ zig 可以从 <https://ziglang.org/download/> 下个 linux x86_64 包解压即�
 ```
 
 `client/install.ps1` 会顺手把它拷过去。
-（`start-steam.bat` 是这个 exe 早期版本用的启动脚本，现在 exe 不再需要它；
-想只用 bat 的人可以自己留着用。）
 
-仓库里附了一份编好的 `client/MaimaiSteam.exe`（**966144 字节 / md5 `103b0056849f4b002bb66e947a6e3788`**）。
+仓库里附了一份编好的 `client/MaimaiSteam.exe`（**976896 字节 / md5 `ce6742d034300b867841a90c5ab06c3e`**）。
 用上面任一方式重编后 md5 会变，这是正常的 —— 编译器会在产物里写时间戳，
 判断"是不是同一份"看行为（或看 `MaimaiSteam.exe` 旁的源码）而不是 md5。
 
@@ -98,21 +139,50 @@ zig 可以从 <https://ziglang.org/download/> 下个 linux x86_64 包解压即�
 
 图标随便挑（`Sinmai.exe` 那个就行，只是用来抽图标，不会执行它）。
 
+**注意**：非 Steam 游戏不能用 `steam://rungameid/…` 或 `steam -applaunch` 这种命令行触发，
+只能在库里点「开始」（实测：Steam 只记录 URL、不启动）。
+
 ## 日志与排查
 
 | 文件（在 `Package\` 下） | 内容 |
 | --- | --- |
-| `maimaiDX.log` | launcher 视角：第几轮、游戏是否起来、活了多久、是否重试 |
-| `steam-launch.log` | bat 视角：`inject` 第几次尝试、amdaemon 有没有起来、什么时候启动游戏 |
+| `maimaiDX.log` | launcher 视角：上下文（提权/Steam 环境变量/overlay 有没有在本进程里）、走了哪条路、amdaemon 有没有起来、游戏活了多久、是否重试；失败时还会把 `inject-out.txt` 的内容抄进来 |
+| `inject-out.txt` | `inject` 自己的输出（失败时这里有原话） |
+| `_maimai-steam-inject.txt` | 计划任务 helper 的回报（`ok` / `failed`），正常情况下跑完就删 |
+
+一份**成功**的 Steam 启动长这样：
+
+```
+launcher start [started by Steam] [Steam overlay DLL is inside this process]
+Steam is in this process tree -> injection goes to the Task Scheduler
+detach: injection handed to the Task Scheduler (outside Steam's process tree)
+[helper] attempt 1: amdaemon.exe is up
+detached injection: amdaemon.exe is up
+round 1: started Sinmai.exe -monitor 2
+15s check: game=up amdaemon=up
+launch looks healthy, waiting for the game to exit
+```
 
 常见情况：
 
-- game exited after **26s+** → 正常，游戏是自己退出的（你关的/打完退出）
-- game exited after 几秒 + `that launch died too early, retrying` → 注入失败那只手，自动重试
-- `the batch finished without starting the game (inject failed)` → 5 次注入全失败，
-  这时候要看 `steam-launch.log` 里 inject 的报错，通常是安全软件在拦 DLL 注入
+- `game exited after 26s+` → 正常，游戏是自己退出的（你关的/打完退出）
+- `round N: launch failed (this is the black-screen case), retrying` → 注入没成，自动重试
+- 最后弹错误框 + 日志里有 `inject says: mai2hook.dll: DLL failed to load inside target process`
+  → 注入又被别的东西干扰了（杀软 / 另一个注入器 / Steam overlay 还在）。
+  先把这条快捷方式的覆盖层关掉再试（见上面「另一条同样有效的路」），
+  并把 `maimaiDX.log` + `inject-out.txt` 发出来。
+- 计划任务建不起来（日志里 `detach: schtasks /create failed`）→ launcher 会自动退回"在树里直接注入"，
+  行为跟旧版一样。
+
+### 排查用的小开关（一般用不到）
+
+| 参数 | 作用 |
+| --- | --- |
+| `--inject-only` | 只做注入（计划任务用的就是这个） |
+| `--force-detach` | 强制走计划任务那条路，方便手动验证 |
+| `--no-detach` | 强制留在 Steam 进程树里直接注入（复现老问题时用） |
 
 ## 回退
 
-删掉 `MaimaiSteam.exe` / `start-steam.bat`（以及两个 log），Steam 里改回直接指向
+删掉 `MaimaiSteam.exe` / `maimaiDX.log` / `inject-out.txt`，Steam 里改回直接指向
 `start.bat`（会挂一个黑框，但能用），或者重新用你原来的启动方式 —— `start.bat` 从来没被改过。
