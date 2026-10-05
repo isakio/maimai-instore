@@ -1,14 +1,12 @@
 ﻿// InStoreLink —— 挂补丁的小工具
 //
-// Harmony 的 CreateAndPatchAll(整个类) 一旦有一条失败了，异常信息只有一句
-// "IL Compile Error (unknown location)"，根本不知道是哪一条、为什么。
+// 为什么不用 Harmony 的 CreateAndPatchAll(整个类)：它遇到第一条失败就抛，
+// 异常只有一句 "IL Compile Error (unknown location)"，既不知道是哪条、也看不到原因，
+// 而且后面那些本来能挂上的补丁**全都不挂了**（第一次实测就栽在这上面）。
 //
-// 所以这里做两件事：
-//   1. 正常先按类挂（快、日志干净）
-//   2. 一旦抛异常，就退化成"一条一条挂"：自己从 HarmonyPatch 特性里读出目标方法，
-//      单独 patch 并逐条打印成功/失败 + 完整异常。这样下次启动日志里就能直接看到罪魁祸首。
-//
-// 反正 Harmony 的补丁是幂等的：重复打同一条不会出问题，失败的那条也污染不了别的。
+// 这里改成一条一条挂：自己从 HarmonyPatch 特性里读出目标方法，单独 patch，
+// 逐条打印成功/失败 + 完整异常。失败的那条只影响它自己，日志里直接点名。
+// 代价是启动时多几十次反射调用，可以忽略。
 
 using System;
 using System.Reflection;

@@ -7,7 +7,7 @@ instorematchd 协议自测：模拟两个客户端，把注册 / 心跳 / 开房
   python3 instorematchd.py --bind 127.0.0.1 --lobby-port 21100 --relay-port 21101 &
   python3 test_protocol.py
 
-环境变量：NYD_HOST / NYD_LOBBY / NYD_RELAY 换目标，IMD_ADMIN_TOKEN 顺带测管理员视图。
+环境变量：IMD_HOST / IMD_LOBBY / IMD_RELAY 换目标，IMD_ADMIN_TOKEN 顺带测管理员视图。
 """
 
 import hashlib
@@ -21,10 +21,10 @@ import urllib.request
 from urllib.parse import quote
 
 # 默认连生产端口；本地自测时用环境变量覆盖，例如：
-#   NYD_LOBBY=21100 NYD_RELAY=21101 python3 test_protocol.py
-HOST = os.environ.get("NYD_HOST", "127.0.0.1")
-LOBBY = int(os.environ.get("NYD_LOBBY", 20100))
-RELAY = int(os.environ.get("NYD_RELAY", 20101))
+#   IMD_LOBBY=21100 IMD_RELAY=21101 python3 test_protocol.py
+HOST = os.environ.get("IMD_HOST", "127.0.0.1")
+LOBBY = int(os.environ.get("IMD_LOBBY", 20100))
+RELAY = int(os.environ.get("IMD_RELAY", 20101))
 # 设了的话顺带检查管理员视图（install.sh 会把 IMD_ADMIN_TOKEN 透传进来）
 ADMIN = os.environ.get("IMD_ADMIN_TOKEN", "")
 K1, K2 = "W1111111111", "W2222222222"

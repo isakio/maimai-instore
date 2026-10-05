@@ -8,7 +8,7 @@
 // 源码改了而发行版忘了重编，指纹就对不上。
 //
 // 真踩过这个坑：client/InStoreLink.dll 收进仓库之后，源码又改了 LinkConfig（加 BOM 兼容），
-// 发行版没跟着重编 —— 字节数一样（48128）、md5 看不出来，是靠这个指纹发现的。
+// 发行版没跟着重编 —— 字节数一样、md5 看不出来，是靠这个指纹发现的。
 //
 //   csc /r:Mono.Cecil.dll /out:fingerprint.exe fingerprint.cs
 //   fingerprint.exe <dll>            打印指纹

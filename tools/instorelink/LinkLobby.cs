@@ -1,16 +1,17 @@
 ﻿// InStoreLink —— 大厅 HTTP 客户端
 //
-// 三个接口（格式和上游 worldlinkd / 我们的 instorematchd 都一样）：
+// 五个接口（格式和上游 worldlinkd / 我们的 instorematchd 都一样）：
 //   GET  /info           → {"relayHost":"isakio.cn","relayPort":20101}
 //   GET  /online         → {"totalUsers":2,"activeRecruits":1}
 //   GET  /recruit/list   → 每行一条 JSON（房主上传的招募数据，不含 Keychip）
 //   POST /recruit/start  → {"Keychip":"W...","RecruitInfo":{...}}
 //   POST /recruit/finish → 同上（关房）
 //
-// 用 WebClient + 线程回调，和上游一致（.NET Framework 4.0 上没有 HttpClient）。
-// 所有方法都不抛异常，把错误交给回调，避免把游戏线程带崩。
+// 拉数据用 WebClient（.NET Framework 3.5/4.0 上没有 HttpClient），所有方法都不抛异常：
+// 同步那个把错误变成"返回 null"，异步那个把错误交给回调，避免把游戏线程带崩。
 
 using System;
+using System.IO;
 using System.Net;
 using System.Text;
 
@@ -18,7 +19,7 @@ namespace InStoreLink
 {
     public static class LinkLobby
     {
-        private const int TimeoutMs = 8000;
+        public const int TimeoutMs = 8000;
 
         public static string Combine(string baseUrl, string path)
         {
@@ -44,33 +45,31 @@ namespace InStoreLink
             }
         }
 
-        /// <summary>异步 GET。callback(响应文本, 异常)；两者必有一个为 null。</summary>
-        public static void GetAsync(string url, Action<string, Exception> callback)
+        /// <summary>
+        /// 同步 GET，带超时（WebClient 自己没法设超时，用 HttpWebRequest）。
+        /// 成功返回响应文本，任何失败返回 null —— 调用方可以据此重试。
+        /// </summary>
+        public static string GetWithTimeout(string url, int timeoutMs)
         {
-            if (string.IsNullOrEmpty(url))
-            {
-                if (callback != null) callback(null, new ArgumentNullException("url"));
-                return;
-            }
+            if (string.IsNullOrEmpty(url)) return null;
             try
             {
-                WebClient web = NewWebClient();
-                web.DownloadStringCompleted += delegate(object sender, DownloadStringCompletedEventArgs e)
+                HttpWebRequest request = (HttpWebRequest)WebRequest.Create(new Uri(url));
+                request.Method = "GET";
+                request.Proxy = null;
+                request.Timeout = timeoutMs;
+                request.ReadWriteTimeout = timeoutMs;
+                using (WebResponse response = request.GetResponse())
+                using (Stream stream = response.GetResponseStream())
+                using (StreamReader reader = new StreamReader(stream, new UTF8Encoding(false)))
                 {
-                    try
-                    {
-                        if (callback != null) callback(e.Cancelled ? null : e.Result, e.Error);
-                    }
-                    finally
-                    {
-                        web.Dispose();
-                    }
-                };
-                web.DownloadStringAsync(new Uri(url));
+                    return reader.ReadToEnd();
+                }
             }
             catch (Exception ex)
             {
-                if (callback != null) callback(null, ex);
+                LinkLog.Debug("GET " + url + " 失败：" + ex.Message);
+                return null;
             }
         }
 
@@ -86,7 +85,12 @@ namespace InStoreLink
                 {
                     try
                     {
-                        if (callback != null) callback(e.Cancelled ? null : e.Result, e.Error);
+                        if (callback == null) return;
+                        // e.Error != null 时读 e.Result 会直接把那个异常抛出来（AsyncCompletedEventArgs
+                        // 的既定行为），所以必须先看 Error 再取 Result。
+                        if (e.Error != null) callback(null, e.Error);
+                        else if (e.Cancelled) callback(null, new OperationCanceledException(url));
+                        else callback(e.Result, null);
                     }
                     finally
                     {

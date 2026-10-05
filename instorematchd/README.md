@@ -1,4 +1,4 @@
-# instorematchd —— 自己写的 NyanLink 服务端
+# instorematchd —— 自研联机服务端（大厅 + 中继）
 
 参照 [MuNET-OSS/NyanLink](https://github.com/MuNET-OSS/NyanLink)（Kotlin 版 worldlinkd）重写，
 **协议完全兼容，客户端 mod 不用改任何东西**，只要 `LobbyUrl` 指向本服务即可。

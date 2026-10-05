@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""中继协议的 Python 模型（和 src/LinkProtocol.cs 一一对应）。
+"""中继协议的 Python 模型（和 tools/instorelink/LinkProtocol.cs 一一对应）。
 
 用途：
   * 在不用 Windows / 游戏的情况下验证协议规则（tests/test_vectors.py）

@@ -3,7 +3,7 @@
 // 这一层干的事：把游戏本体的"局域网 socket"整个换成我们的影子 socket，
 // 把招募（开房/关房）改成走 HTTP 大厅，顺手关掉包加密（因为加密后的包没法中继转发）。
 //
-// 补丁清单（每一项都在 docs/说明.md 的"与游戏本体的耦合点"表里）：
+// 补丁清单（每一项都在 docs/客户端mod实现.md 的"与游戏本体的耦合点"表里）：
 //   NFSocket.*                → 转发给 LinkSocket（影子 socket）
 //   SocketBase.sendClass      → 拦掉无关广播；StartRecruit/FinishRecruit 改走 HTTP
 //   SocketBase.error          → 原样打日志（本来会被吞）
@@ -12,7 +12,7 @@
 //   Packet.isSameVersion      → 强制 true（两边客户端版本号不同也能连）
 //   AMDaemon.Network.IsLanAvailable → 强制 true（否则游戏认为"不在店内"）
 //   StartupProcess.OnUpdate   → 跳过本体联网自检，直接进"可联机"状态；顺带写状态行
-//   CommonMonitor.ViewUpdate  → 右下角状态文字（NyanLink / PING 那几行）
+//   CommonMonitor.ViewUpdate  → 右下角状态文字（上游 mod 画的那几行状态面板）
 //
 // 上游 https://github.com/MuNET-OSS/NyanLink （MIT），本文件是它的等价重写。
 
@@ -382,7 +382,9 @@ namespace InStoreLink
         public static bool PreNFConnectAsync(NFSocket __instance, SocketAsyncEventArgs e, int mockID,
             ref bool __result)
         {
-            __result = Shadow(__instance).ConnectAsync(e, mockID);
+            LinkSocket shadow = Shadow(__instance);
+            if (shadow == null) return NoShadow(__instance, "ConnectAsync");
+            __result = shadow.ConnectAsync(e, mockID);
             return false;
         }
 
@@ -401,7 +403,9 @@ namespace InStoreLink
         public static bool PreNFClose(NFSocket __instance)
         {
             LinkSocket shadow = Shadow(__instance);
-            if (shadow != null) shadow.Close();
+            // 没影子 socket 就别拦着，让本体关掉它自己的真 socket（否则就是泄漏）
+            if (shadow == null) return true;
+            shadow.Close();
             return false;
         }
 
@@ -410,7 +414,8 @@ namespace InStoreLink
         public static bool PreNFShutdown(NFSocket __instance, SocketShutdown how)
         {
             LinkSocket shadow = Shadow(__instance);
-            if (shadow != null) shadow.Shutdown(how);
+            if (shadow == null) return true;
+            shadow.Shutdown(how);
             return false;
         }
 

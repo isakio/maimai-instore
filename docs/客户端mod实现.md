@@ -5,7 +5,7 @@
 1. **说明文档**（就是本文件）：把上游 [MuNET-OSS/NyanLink](https://github.com/MuNET-OSS/NyanLink)
    的客户端 mod（发布出来叫 `WorldLink.dll`）**从头到尾读了一遍**之后的笔记 ——
    它怎么把游戏本体的「局域网 party」搬到公网上、线协议长什么样、跟游戏哪些地方咬在一起。
-2. **重写版客户端 mod**（`src/`，产物 `InStoreLink.dll`）：协议完全兼容，
+2. **重写版客户端 mod**（`tools/instorelink/`，产物 `InStoreLink.dll`）：协议完全兼容，
    但代码是我们自己的（不带 Tomlet 依赖、线程模型更稳、配置和日志更适合我们排查），
    以后要改就改这份。
 
@@ -17,11 +17,11 @@ tools/instorelink/            ← 重写版源码：C# 5，11 个文件（本文
 tools/build_instorelink.ps1   ← Windows 侧构建（用系统自带 csc.exe，不需要 SDK）
 tools/build_wsl.sh            ← WSL 侧构建（借用 Windows 的 csc.exe）
 tools/fingerprint.cs          ← 程序集指纹：判断发行版 dll 是不是当前源码编的
-tests/                        ← 测试：协议单测 / 向量 / 端到端 / 兼容探针 / 参数名 / 发行版指纹
+tests/                        ← 测试：协议单测 / 向量 / 端到端 / 兼容探针 / 参数名 / 发行版指纹 / 文档一致性
 ├── ProtocolTests.cs          ← 协议层单测（不依赖游戏，能单独编出来跑）
 ├── GameCompatProbe.cs        ← 游戏兼容性探针（补丁目标 / 注入字段类型）
-├── run_all.sh                ← 一键跑全部（7 步）
-└── py/{linkproto,test_vectors,test_e2e}.py
+├── run_all.sh                ← 一键跑全部（8 步）
+└── py/{linkproto,test_vectors,test_e2e,test_docs}.py
 docs/客户端mod实现.md          ← 本文件
 ```
 
@@ -46,7 +46,7 @@ docs/客户端mod实现.md          ← 本文件
 | 角色 | 是什么 | 我们仓库里的对应物 |
 | --- | --- | --- |
 | **游戏本体** | SDEZ 1.70 的 `Assembly-CSharp.dll`：`PartyLink.*`（socket、包）、`Manager.Party.Party.*`（party 管理、招募） | 不动它，只打补丁 |
-| **客户端 mod** | 上游 `WorldLink.dll` / 我们的 `InStoreLink.dll`：MelonLoader + Harmony 插件 | `src/` |
+| **客户端 mod** | 上游 `WorldLink.dll` / 我们的 `InStoreLink.dll`：MelonLoader + Harmony 插件 | `tools/instorelink/` |
 | **服务端** | 大厅（HTTP，管招募列表）+ 中继（TCP，转发 party 数据） | `instorematchd`（我们自己那套） |
 
 数据流（两台机子联机时）：
@@ -320,7 +320,7 @@ bash tools/build_wsl.sh /mnt/e/game/xxx/Package   # 游戏装别处时
 
 1. 第一轮 33 条补丁里挂了 32 条（唯一失败的就是上面那条 `nfSocket`/`socket` 参数名笔误），
    但连接、注册、心跳、影子 socket 绑定、跳过联网自检、选曲界面的「店内マッチング」全都正常；
-2. 用假玩家（`tools/fake_player.py`，另一个仓库里那份）在大厅挂了一个房间，
+2. 用假玩家（[`tools/fake_player.py`](../tools/fake_player.py)）在大厅挂了一个房间，
    游戏里 10 秒内就收到了：`[InStoreLink] 收到招募：{... "UserNames":["假朋友", ...]}` ——
    **大厅→轮询→主线程分发→游戏本体**这条链路实测打通。
 
@@ -334,7 +334,7 @@ bash tools/build_wsl.sh /mnt/e/game/xxx/Package   # 游戏装别处时
 ## 九、测试
 
 ```bash
-bash tests/run_all.sh        # 七步全跑，半分钟左右
+bash tests/run_all.sh        # 八步全跑，半分钟左右
 ```
 
 | 测试 | 覆盖什么 | 现在的结果 |
@@ -346,6 +346,7 @@ bash tests/run_all.sh        # 七步全跑，半分钟左右
 | `tests/GameCompatProbe.cs` | **游戏兼容性探针**：补丁目标方法是否存在、注入字段类型是否匹配、反射句柄拿不拿得到（60 项） | ✅ 全绿 |
 | `tools/check_patch_params.cs` | **参数名检查**：33 条补丁的普通参数名逐个和游戏对齐，外加 Prefix/Postfix 标注、`___字段` 是否存在（Harmony 是按名字传参的） | ✅ 全绿 |
 | `tools/fingerprint.cs` | **发行版指纹**：`client/` 里那两个 dll 是不是真的由当前源码编出来的（csc 输出不可复现，md5 比不出来） | ✅ 全绿 |
+| `tests/py/test_docs.py` | **文档一致性**：发行 dll 的字节数 / md5、Markdown 相对链接、补丁条数、旧名字残留、`third_party/` 里有没有二进制 | ✅ 全绿 |
 
 探针也可以单独跑（游戏更新之后必跑）：
 

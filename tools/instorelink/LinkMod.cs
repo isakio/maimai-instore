@@ -32,12 +32,7 @@ namespace InStoreLink
         public override void OnInitializeMelon()
         {
             string note;
-            string configPath = ConfigFile;
-            if (!File.Exists(configPath) && File.Exists(LegacyConfigFile))
-            {
-                configPath = LegacyConfigFile;
-                LinkLog.Msg("没找到 " + ConfigFile + "，先用老的 " + LegacyConfigFile);
-            }
+            string configPath = LocateConfig(out note);
             LinkRuntime.Config = LinkConfig.Load(configPath, out note);
             LinkLog.Verbose = LinkRuntime.Config.Debug;
 
@@ -51,6 +46,45 @@ namespace InStoreLink
             total += LinkPatching.ApplyAll(Id, typeof(PatchesNet), "通信层");
             total += LinkPatching.ApplyAll(Id, typeof(PatchesParty), "招募/选曲");
             LinkLog.Msg("挂钩完成，共 " + total + " 条生效");
+        }
+
+        /// <summary>
+        /// 找配置文件：先按相对路径找（Unity 游戏的当前目录正常就是游戏根目录），
+        /// 再用进程主程序所在目录（Sinmai.exe 那一层，等于游戏根目录）拼一遍 ——
+        /// 有些启动器会把当前目录设到别处，那时相对路径找不到会静默回落默认大厅
+        /// （自建大厅的人会莫名其妙连到我们这台）。
+        /// </summary>
+        private static string LocateConfig(out string note)
+        {
+            note = null;
+            string root = null;
+            try { root = AppDomain.CurrentDomain.BaseDirectory; }
+            catch (Exception) { }
+
+            if (File.Exists(ConfigFile)) return ConfigFile;
+            if (!string.IsNullOrEmpty(root))
+            {
+                string full = Path.Combine(root, ConfigFile);
+                if (File.Exists(full)) return full;
+            }
+
+            if (File.Exists(LegacyConfigFile))
+            {
+                LinkLog.Msg("没找到 " + ConfigFile + "，先用老的 " + LegacyConfigFile);
+                return LegacyConfigFile;
+            }
+            if (!string.IsNullOrEmpty(root))
+            {
+                string legacyFull = Path.Combine(root, LegacyConfigFile);
+                if (File.Exists(legacyFull))
+                {
+                    LinkLog.Msg("没找到 " + ConfigFile + "，先用老的 " + legacyFull);
+                    return legacyFull;
+                }
+            }
+
+            // 都没有：交给 LinkConfig.Load 去解释（它会打一句提示，然后走默认大厅）
+            return ConfigFile;
         }
 
         public override void OnApplicationQuit()

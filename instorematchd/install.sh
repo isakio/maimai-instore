@@ -107,7 +107,7 @@ systemctl --no-pager --lines=0 status instorematchd || true
 echo "==> 5/5 自检"
 # 自检要连我们刚装的这套端口（默认 20100/20101，自定义端口时靠环境变量传进去）；
 # token 一起透传，给了的话自检会连管理员视图也验一遍。
-NYD_LOBBY="$LOBBY_PORT" NYD_RELAY="$RELAY_PORT" IMD_ADMIN_TOKEN="${IMD_ADMIN_TOKEN:-}" \
+IMD_LOBBY="$LOBBY_PORT" IMD_RELAY="$RELAY_PORT" IMD_ADMIN_TOKEN="${IMD_ADMIN_TOKEN:-}" \
     "$PY" "$DIR/test_protocol.py" \
     || echo "（协议自测有失败项，看上面输出）"
 echo

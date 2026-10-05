@@ -225,9 +225,14 @@ namespace InStoreLink
                 return 0;
             }
             byte[] data = Convert.FromBase64String(msg.Data);
-            Buffer.BlockCopy(data, 0, buffer, 0, data.Length);
+            // 尊重调用方给的 offset/size：以前是从 0 开始整段拷，既可能写错位置，
+            // 也可能越过 size 把缓冲区写坏。装不下就截断，并留一行日志。
+            int n = data.Length < size ? data.Length : size;
+            if (n < data.Length)
+                LinkLog.Warn("收到 " + data.Length + " 字节，但缓冲区只剩 " + size + "，已截断");
+            Buffer.BlockCopy(data, 0, buffer, offset, n);
             errorCode = SocketError.Success;
-            return data.Length;
+            return n;
         }
 
         public int ReceiveFrom(byte[] buffer, SocketFlags flags, ref EndPoint remoteEp)

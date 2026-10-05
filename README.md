@@ -86,11 +86,11 @@
 │   ├── il.py / find_type.py / dump_sigs.cs / fingerprint.cs  ← 读游戏程序集的小工具
 │   ├── fake_player.py             ← 假玩家：不用真人就能测招募/进房
 │   └── README.md                  ← 插件内部逻辑、四个开关、踩过的坑
-├── tests/                         ← 测试：协议单测 / 向量 / 端到端 / 兼容探针 / 参数名 / 发行版指纹
-│   ├── run_all.sh                 ← 一键跑全部（7 步）
+├── tests/                         ← 测试：协议单测 / 向量 / 端到端 / 兼容探针 / 参数名 / 发行版指纹 / 文档一致性
+│   ├── run_all.sh                 ← 一键跑全部（8 步）
 │   ├── ProtocolTests.cs           ← 协议层单测（不依赖游戏，能单独编出来跑）
 │   ├── GameCompatProbe.cs         ← 游戏兼容性探针（补丁目标 / 注入字段）
-│   └── py/                        ← 协议模型、真实日志反验、端到端
+│   └── py/                        ← 协议模型、真实日志反验、端到端、文档一致性
 ├── instorematchd/                 ← 自研联机服务端（大厅 + 中继，Python 标准库，零依赖）
 │   ├── install.sh                 ← 一键装（systemd）
 │   ├── Dockerfile / docker-compose.yml
@@ -116,7 +116,7 @@
 
 | 文件 | 干什么 | 校验 |
 | --- | --- | --- |
-| [`client/InStoreLink.dll`](client/InStoreLink.dll) | 联机本体：注册中继、开房、把对方的房间喂回游戏 | v0.1，48128 字节 / md5 `c44410c03b96aecea79da1a53ecd752e` |
+| [`client/InStoreLink.dll`](client/InStoreLink.dll) | 联机本体：注册中继、开房、把对方的房间喂回游戏 | v0.1，48640 字节 / md5 `e1454e501bcf1f758545ab81e45e9193` |
 | [`client/InStoreMatch.dll`](client/InStoreMatch.dll) | 让选曲界面画出「店内マッチング」那一格 | v2.5，18432 字节 / md5 `1a94a9b6be9b03bfb274e41b0a8256b3` |
 
 两个文件都在本仓库的 [`client/`](client/) 里（[最新 Release](https://github.com/isakio/maimai-instore/releases/latest) 也附了），不用再去别的地方下。

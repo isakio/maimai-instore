@@ -1,6 +1,6 @@
 # instorematchd systemd 单元（由 install.sh 生成，__HOST_OVERRIDE__ 会替换成你的域名/IP）
 [Unit]
-Description=instorematchd (NyanLink compatible lobby + relay)
+Description=instorematchd (maimai in-store matching lobby + relay)
 After=network.target
 
 [Service]

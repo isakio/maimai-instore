@@ -3,7 +3,7 @@
 #
 #   bash tests/run_all.sh [游戏目录]
 #
-# 七步：
+# 八步：
 #   1. 编译 InStoreLink.dll（能编过 = 源码和游戏本体的 API 对得上）
 #   2. C# 协议单测（序列化 / 解析 / 伪 IP / 配置）
 #   3. Python 协议向量测试（含真实抓包日志的还原）
@@ -11,6 +11,7 @@
 #   5. 游戏兼容性探针（补丁目标 / 注入字段）
 #   6. 补丁参数名检查（Harmony 按名字传参）
 #   7. 发行版指纹（client/ 里那两个 dll 是不是真的由当前源码编的）
+#   8. 文档一致性（md5 / 字节数 / 补丁条数 / 链接 / 旧名字）
 
 set -uo pipefail
 
@@ -73,6 +74,10 @@ fi
 echo
 echo "########## 7. 发行版指纹（client/ 里的 dll vs 当前源码）"
 bash "$ROOT/tests/run_fingerprint.sh" "$GAME" || FAILED=1
+
+echo
+echo "########## 8. 文档一致性（md5 / 字节数 / 补丁条数 / 链接 / 旧名字）"
+python3 "$ROOT/tests/py/test_docs.py" || FAILED=1
 
 echo
 if [ "$FAILED" -eq 0 ]; then

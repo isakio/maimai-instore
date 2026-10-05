@@ -1,7 +1,7 @@
 ﻿// InStoreLink —— maimai DX 店内联机客户端 mod（WorldLink / NyanLink 的重写版）
 //
 // 本文件：协议层。和上游 WorldLink 逐字节兼容，不依赖 Unity / 游戏本体，
-//         可以单独抽出来编译做单元测试（见 tests/cs/ProtocolTests.cs）。
+//         可以单独抽出来编译做单元测试（见 tests/ProtocolTests.cs）。
 //
 // 线协议回顾（一条消息 = 一行 UTF-8 文本，字段用逗号分隔）：
 //   0=固定 1   1=命令   2=协议(6=TCP/17=UDP)   3=流ID   4=源伪IP   5=源端口

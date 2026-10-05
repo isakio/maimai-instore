@@ -65,6 +65,7 @@ namespace InStoreLink
         private long _delayAvg;
 
         private uint? _stubCache;
+        private string _stubCacheKeychip;      // 上面那个缓存是按哪个 keychip 算出来的
 
         public LinkClient(string keychip, string host, int port)
         {
@@ -79,7 +80,16 @@ namespace InStoreLink
         {
             get
             {
-                if (!_stubCache.HasValue) _stubCache = LinkStub.FromKeychip(Keychip);
+                // 注意：BeforePatch 里 new 这个对象时用的还是占位 keychip，真正的 keychip
+                // 要等刷卡登录（StartClient）才设进来。所以缓存必须跟着 keychip 走 ——
+                // 不然只要在刷卡之前有人读过一次（比如游戏调 Util.MyIpAddress），
+                // 这一局就会一直用错的身份，伪 IP 和中继那边对不上。
+                if (!_stubCache.HasValue || !string.Equals(_stubCacheKeychip, Keychip,
+                                                           StringComparison.Ordinal))
+                {
+                    _stubCache = LinkStub.FromKeychip(Keychip);
+                    _stubCacheKeychip = Keychip;
+                }
                 return _stubCache.Value;
             }
         }

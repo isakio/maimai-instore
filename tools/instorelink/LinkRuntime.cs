@@ -106,32 +106,33 @@ namespace InStoreLink
                 Client.Port = port;
                 LinkLog.Msg("按配置直连中继 " + host + ":" + port);
             }
-            else
-            {
-                FetchRelayInfoFromLobby();
-            }
+            // 没配 RelayUrl 的话，中继地址要等刷卡登录后由 StartClient 的线程去大厅 /info 拿
+            // （带重试，见 TryFetchRelayInfo）。
         }
 
-        private static void FetchRelayInfoFromLobby()
+        /// <summary>
+        /// 从大厅 /info 取中继地址。同步 GET + 超时，拿不到就返回 false 由调用方稍后重试。
+        /// （以前这里是异步回调、失败了没人重试：大厅只要在那一瞬间不通，这一整局就永远连不上。）
+        /// </summary>
+        private static bool TryFetchRelayInfo()
         {
             string url = LinkLobby.Combine(Config.LobbyUrl, "/info");
-            LinkLobby.GetAsync(url, delegate(string body, Exception error)
+            string body = LinkLobby.GetWithTimeout(url, LinkLobby.TimeoutMs);
+            if (string.IsNullOrEmpty(body))
             {
-                if (error != null)
-                {
-                    LinkLog.Error("拿不到中继地址（" + url + "）：" + error.Message);
-                    return;
-                }
-                ServerInfo info = JsonUtility_FromJson<ServerInfo>(body);
-                if (info == null || string.IsNullOrEmpty(info.relayHost))
-                {
-                    LinkLog.Error("大厅 /info 返回的内容看不懂：" + body);
-                    return;
-                }
-                Client.Host = info.relayHost;
-                Client.Port = info.relayPort > 0 ? info.relayPort : LinkConfig.DefaultRelayPort;
-                LinkLog.Msg("中继地址（来自大厅）：" + Client.Host + ":" + Client.Port);
-            });
+                LinkLog.Error("拿不到中继地址（" + url + "）");
+                return false;
+            }
+            ServerInfo info = JsonUtility_FromJson<ServerInfo>(body);
+            if (info == null || string.IsNullOrEmpty(info.relayHost))
+            {
+                LinkLog.Error("大厅 /info 返回的内容看不懂：" + body);
+                return false;
+            }
+            Client.Host = info.relayHost;
+            Client.Port = info.relayPort > 0 ? info.relayPort : LinkConfig.DefaultRelayPort;
+            LinkLog.Msg("中继地址（来自大厅）：" + Client.Host + ":" + Client.Port);
+            return true;
         }
 
         /// <summary>游戏登录时调用：随机 keychip → 连中继 → 起在线人数轮询线程。</summary>
@@ -144,7 +145,12 @@ namespace InStoreLink
             string keychip = LinkStub.NewKeychip(new Random());
             Thread thread = new Thread(delegate()
             {
-                while (string.IsNullOrEmpty(Client.Host) && !Stopping) Thread.Sleep(100);
+                // 等中继地址：配置里给了 RelayUrl 的话 BeforePatch 已经填好，
+                // 否则去大厅 /info 拿；拿不到就每 5 秒重试一次，而不是干等着永不重试。
+                while (!Stopping && string.IsNullOrEmpty(Client.Host))
+                {
+                    if (!TryFetchRelayInfo() && !Stopping) Thread.Sleep(5000);
+                }
                 if (string.IsNullOrEmpty(Client.Host)) return;
 
                 Client.Keychip = keychip;
