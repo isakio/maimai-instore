@@ -353,6 +353,7 @@ bash tests/run_all.sh        # 八步全跑，半分钟左右
 | `tools/check_patch_params.cs` | **参数名检查**：两个 dll 的补丁（InStoreLink 33 条 + InStoreMatch 8 个补丁方法）的普通参数名逐个和游戏对齐，外加 Prefix/Postfix 标注、`___字段` 是否存在（Harmony 是按名字传参的） | ✅ 全绿 |
 | `tools/fingerprint.cs` | **发行版指纹**：`client/` 里那两个 dll 是不是真的由当前源码编出来的（csc 输出不可复现，md5 比不出来） | ✅ 全绿 |
 | `tests/py/test_docs.py` | **文档一致性**：发行 dll 的字节数 / md5、Markdown 相对链接、补丁条数、旧名字残留、`third_party/` 里有没有二进制 | ✅ 全绿 |
+| `tests/run_release_check.sh` | **Release 附件一致性**（要 gh + 联网，所以不在上面那八步里）：GitHub 上最新 Release 挂的两个 dll 和 `client/` 里的实物是否一致 —— 拿 API 的 digest 比，不靠下载（下载链接有 CDN 缓存） | ✅ 全绿 |
 
 探针也可以单独跑（游戏更新之后必跑）：
 
@@ -360,6 +361,7 @@ bash tests/run_all.sh        # 八步全跑，半分钟左右
 bash tests/run_probe.sh      # 临时把探针拷进 Managed\ 执行，跑完自动删掉
 bash tests/run_param_check.sh  # 只查参数名（秒级）
 bash tests/run_fingerprint.sh  # 只查发行版 dll 有没有落后于源码
+bash tests/run_release_check.sh  # 只查 Release 附件有没有落后于 client/（发版后跑，需要 gh + 联网）
 
 # 手里有联机时抓的 *.log 时，第 3 步会额外拿真实报文再验一遍（不设就跳过）
 MAIMAI_LOGS=/path/to/logs bash tests/run_all.sh

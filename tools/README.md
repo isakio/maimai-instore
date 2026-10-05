@@ -260,3 +260,14 @@ powershell -ExecutionPolicy Bypass -File .\build_instorematch.ps1 -Game "<游戏
    ```bash
    gh release create vX.Y client/InStoreMatch.dll --title "InStoreMatch vX.Y" --notes "..."
    ```
+
+5. **发布后确认附件真的和仓库里那份一致**（踩过：`client/` 重编提交了，Release 附件还是旧的，
+   而 README 写着"最新 Release 也附了"，照 README 下载的人拿到的是旧逻辑）：
+
+   ```bash
+   bash tests/run_release_check.sh          # 默认查 latest，也可以 bash tests/run_release_check.sh vX.Y
+   ```
+
+   它拿 API 报的 digest（服务端真值）比，**不是靠下载**——GitHub 的下载链接走 CDN，
+   刚替换完附件时可能还命中旧缓存（实测：服务端已经是新文件，下载回来还是旧的，几分钟后才对上）。
+   不一致时会直接告诉你重传命令（`gh release upload <tag> client/*.dll --clobber`）。
