@@ -174,6 +174,10 @@ launch looks healthy, waiting for the game to exit
 - 计划任务建不起来（日志里 `detach: schtasks /create failed`）→ launcher 会自动退回"在树里直接注入"，
   行为跟旧版一样。
 
+> 小提醒：正常退出游戏（游戏里退出）时 launcher 会把 amdaemon / inject 一起收干净；
+> 但如果在 Steam 里点「停止」把 launcher 直接杀掉，可能留下一个 amdaemon.exe —— 无害，
+> 下次启动时 launcher 会先把它清掉。
+
 ### 排查用的小开关（一般用不到）
 
 | 参数 | 作用 |
