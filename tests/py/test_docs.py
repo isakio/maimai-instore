@@ -190,6 +190,28 @@ def main():
           "InStoreMatch 的挂钩成功行也是常显（MelonLogger.Msg）",
           "InStoreMatch.cs 里的挂钩成功行被改成有条件打印了")
 
+    # ---------------------------------------------- 7. 其它被文档点名的日志行
+    # 同一类坑的第二例：「已连接中继 ……」被 README / 配置清单 / 客户端实现文档 /
+    # 给朋友看的说明四处拿来当"装好了"的验收依据，而那行原来也是 Debug-only。
+    print("7) 验收日志：其它被文档点名的行是否常显")
+    wanted = [
+        ("LinkClient.cs", "已连接中继"),
+    ]
+    bad = []
+    for fname, keyword in wanted:
+        text = read(os.path.join(ROOT, "tools", "instorelink", fname))
+        line = None
+        for l in text.splitlines():
+            if keyword in l and "LinkLog." in l:
+                line = l.strip()
+                break
+        if line is None:
+            bad.append("%s 里找不到打印「%s」的语句" % (fname, keyword))
+        elif not line.startswith("LinkLog.Msg("):
+            bad.append("%s 里的「%s」用的是 %s（默认 Debug=false 不会打，"
+                       "而文档让人拿它做验收）" % (fname, keyword, line.split("(")[0]))
+    check(not bad, "被文档点名的验收日志行都是常显", "\n      ".join(bad))
+
     print()
     if FAIL:
         print("失败 %d 项：" % len(FAIL))

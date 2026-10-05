@@ -175,7 +175,9 @@ namespace InStoreLink
                 StatusCode = StatusConnected;
 
                 Send(new LinkMsg { Cmd = (int)LinkCmd.CtlStart, Data = Keychip });
-                LinkLog.Info("已连接中继 " + Host + ":" + Port + "（本机伪 IP " + StubIp + "）");
+                // 用 Msg（常显）：README / 配置清单 / 给朋友的说明 / 技术文档都写着
+                // "日志里应该出现这一行"，默认 Debug=false 的玩家必须也能看到。
+                LinkLog.Msg("已连接中继 " + Host + ":" + Port + "（本机伪 IP " + StubIp + "）");
 
                 _sendThread = StartLoop(SendLoop, "InStoreLink-Send");
                 _recvThread = StartLoop(RecvLoop, "InStoreLink-Recv");
