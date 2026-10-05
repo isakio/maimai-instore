@@ -313,6 +313,8 @@ def l7_room_ttl_and_refresh():
         next_refresh = t0 + 10
         while time.time() - t0 < 40:
             time.sleep(1)
+            # 房主必须保持在线：不发心跳的话服务端 30 秒就会把它（连同房间）收走
+            host.send(Msg(CTL_HEARTBEAT))
             if time.time() >= next_refresh:
                 next_refresh += 10
                 http("POST", "/recruit/start", recruit_body(hk, stub))
