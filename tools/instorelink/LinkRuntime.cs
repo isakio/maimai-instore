@@ -267,11 +267,19 @@ namespace InStoreLink
                 string body = LinkLobby.Get(LinkLobby.Combine(Config.LobbyUrl, "/recruit/list"));
                 if (string.IsNullOrEmpty(body))
                 {
+                    // ★ 这里必须把"大厅快照"也清空。
+                    //   主线程对账（ReconcileRecruits）拿这份快照当"现在应该有哪些房间"：
+                    //   快照里有的 → 游戏缺就补进去；游戏里有、快照没有 → 从游戏里删掉。
+                    //   以前这里只打一行日志就 return，快照仍留着上一次的房间 —— 于是大厅里
+                    //   房间关了之后，游戏里那几条**永远删不掉**，而且一旦游戏自己丢掉它们
+                    //   还会被这份旧快照**反复喂回去**。玩家看到的就是"大厅里明明没房间了，
+                    //   游戏里还挂着，点进去提示对方不在线"（真机实测踩到）。
                     if (_lastRoomCount != 0)
                     {
                         _lastRoomCount = 0;
                         LinkLog.Debug("招募列表：当前没有房间");
                     }
+                    LastRecruits = new Dictionary<string, RecruitInfo>();
                     return;
                 }
 
