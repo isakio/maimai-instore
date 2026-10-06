@@ -110,10 +110,19 @@ CMD_BROADCAST = 22
 PROTO_TCP = 6
 PROTO_UDP = 17
 PROTO_VERSION = 1
+# 大厅接口的请求体上限。/recruit/start 的真实请求体 ~1 KB，64 KiB 已经非常宽松；
+# 不设上限的话，一句 `Content-Length: 999999999` 就会让 rfile.read() 去啃一个天文数字
+# （挂住一个线程 + 吃内存），而这是个**未鉴权**的公开接口。
+MAX_BODY_BYTES = 64 * 1024
 MAX_STREAMS = 10            # 单个客户端同时挂起的建流上限
 PENDING_TIMEOUT = 10        # 建流请求多久没人接就回收（秒，可用 --pending-timeout 改）
 MAX_ROOMS = 200             # 大厅同时存在的房间上限（可用 --max-rooms 改）
 ROOM_RATE_WINDOW = 10.0     # 开房限速窗口（秒）
+# 中继一条消息（一行文本）允许的最大长度。asyncio 的 StreamReader 默认上限是 64 KiB，
+# 而 DATA_SEND 的 payload 是 base64（原包 4/3 大）—— 游戏一旦发一个 48 KiB 以上的包，
+# 整行就超限，asyncio 抛 LimitOverrunError → 那条连接被直接断开，玩家看到的是"打着打着
+# 两边都掉了"。放宽到 1 MiB（单条上限，不是总量），既够用又不至于被单连接吃爆内存。
+RELAY_LINE_LIMIT = 1024 * 1024
 # 每个来源 IP 在窗口内最多开几次房。放宽到 20 是有意的：实测本体只在"开始招募"
 # 那一下发 StartRecruit（5 分钟 6 次），但万一某个版本每帧/每秒重播，20/10s 也不会
 # 误伤；同时它仍然是"公开接口不能被刷"的底线。
@@ -602,7 +611,8 @@ async def relay_serve(host: str, port: int, heartbeat_timeout: int,
                         STATE.clients.pop(client.stub, None)
                 STATE.log_event("断开", f"{client.keychip}（{stub_to_ip(client.stub)}）离线")
 
-    server = await asyncio.start_server(on_client, host, port)
+    # limit= 一行文本的上限（默认 64 KiB 装不下 base64 之后的大包，见 RELAY_LINE_LIMIT）
+    server = await asyncio.start_server(on_client, host, port, limit=RELAY_LINE_LIMIT)
     LOG.info("中继已启动：%s:%d", host, port)
     sweeper = asyncio.create_task(pending_sweeper())
     try:
@@ -695,8 +705,24 @@ class LobbyHandler(BaseHTTPRequestHandler):
     def _body(self) -> dict:
         try:
             n = int(self.headers.get("Content-Length") or 0)
-            raw = self.rfile.read(n) if n else b""
-            return json.loads(raw.decode("utf-8")) if raw else {}
+            if n <= 0:
+                return {}
+            if n > MAX_BODY_BYTES:
+                # 声明了超长 body：不读、直接当空 body 处理（各 handler 回 400）。
+                # 顺便关掉这条 keep-alive 连接，免得没读走的那堆字节被当成下一个请求。
+                self.close_connection = True
+                return {}
+            raw = self.rfile.read(n)
+            if not raw:
+                return {}
+            data = json.loads(raw.decode("utf-8"))
+            # 只接受 JSON **对象**。数组 / 字符串 / 数字 / true 都能被 json.loads 解出来，
+            # 但后面每个 handler 都是 `(data or {}).get(...)` —— list 没有 .get，
+            # AttributeError 在 HTTP 线程里抛出去 = 这个连接**直接被掐断**，
+            # 客户端看到的是 RemoteDisconnected，而不是一个干净的 400
+            # （未鉴权接口，一个 `[1,2,3]` 就能触发）。这里统一挡成"空对象"，
+            # 由各 handler 按"缺少字段"回 400。
+            return data if isinstance(data, dict) else {}
         except Exception:
             return {}
 

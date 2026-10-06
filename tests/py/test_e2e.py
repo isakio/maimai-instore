@@ -10,6 +10,7 @@
 （可以用 IMD_SERVER_PY 换路径，用 IMD_LOBBY/IMD_RELAY 换端口）
 """
 
+import base64
 import json
 import os
 import socket
@@ -164,6 +165,16 @@ def run_checks():
     check(got.cmd == DATA_SEND and got.data == payload, "房主收到原样的数据", got.readable())
     check(got.src == guest_stub and got.dst == host_stub,
           "报文的 src/dst 被服务端改写成双方伪 IP")
+
+    print("5b) 大包（base64 之后超过 asyncio 默认的 64 KiB 行上限）也要能转发")
+    # 踩过：服务端没给 start_server 传 limit=，一行超过 64 KiB 就 LimitOverrunError →
+    # 整条连接被静默断开（游戏那边表现是"打着打着两边都掉了"）。这里用 70 KB 卡住它。
+    big = base64.b64encode(("x" * 70000).encode()).decode()
+    b.send(Msg(DATA_SEND, proto=PROTO_TCP, sid=sid, src=guest_stub, sport=bind_port,
+               dst=host_stub, dport=bind_port, data=big))
+    got = a.recv(timeout=15)
+    check(got.cmd == DATA_SEND and got.data == big,
+          "70 KB 的包能原样转发（长度 %d）" % len(big), got.readable()[:120])
 
     print("6) 关流（我们补上了 sid，服务端会清流表）")
     b.send(Msg(CTL_TCP_CLOSE, proto=PROTO_TCP, sid=sid, src=guest_stub,

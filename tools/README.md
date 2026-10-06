@@ -152,7 +152,7 @@ bash tools/build_wsl.sh [游戏目录]           # 产物 build/InStoreLink.dll
 改完之后**先跑测试再进游戏**（游戏里的错误要重启一次游戏才能看到，很费时间）：
 
 ```bash
-bash tests/run_all.sh          # 8 步：编译 / 协议单测 / 向量 / 端到端 / 兼容探针 / 参数名 / 发行版指纹 / 文档一致性
+bash tests/run_all.sh          # 10 步：编译 / 协议单测 / 客户端逻辑单测 / 向量 / 端到端 / 异常流程 / 兼容探针 / 参数名 / 发行版指纹 / 文档一致性
 bash tests/run_param_check.sh  # 只查补丁参数名（秒级，改完补丁先跑这个）
 ```
 

@@ -212,8 +212,31 @@ def case_bad_keychip():
     check(code == 200, "本人关房成功（%s）" % code)
 
 
+def case_malformed_body():
+    print("5) 畸形请求体：非 JSON 对象不能把连接掐断")
+    kc = "W9EDGEBODY01"
+    stub = stub_u32(kc)
+    code, _ = http("POST", "/recruit/start", recruit_body(kc, stub))
+    check(code == 200, "对照组：正常 body 能开房（HTTP %s）" % code)
+
+    # 数组 / 字符串 / 数字都能被 json.loads 解出来，但 handler 里是 `(data or {}).get(...)`，
+    # 非 dict 会 AttributeError —— 在 HTTP 线程里抛出去就是"连接被掐断"（客户端看到
+    # RemoteDisconnected），而不是 400。未鉴权接口，一个 [1,2,3] 就能触发。
+    for name, body in (("JSON 数组", [1, 2, 3]), ("JSON 字符串", "hello"),
+                       ("JSON 数字", 42), ("JSON 数组(关房)", ["x"])):
+        path = "/recruit/finish" if name.endswith("(关房)") else "/recruit/start"
+        try:
+            code, _ = http("POST", path, body)
+        except Exception as exc:              # 连接被掐断会在这里冒出来
+            code = "连接被掐断(%s)" % type(exc).__name__
+        check(code in (400, 404), "%s 回 4xx 而不是断连（%s %s）" % (name, path, code))
+
+    code, _ = http("POST", "/recruit/finish", recruit_body(kc, stub))
+    check(code == 200, "畸形请求之后服务端照常工作（HTTP %s）" % code)
+
+
 def case_pending_timeout():
-    print("5) 一直没人接流 → 到点回收（--pending-timeout 3）")
+    print("6) 一直没人接流 → 到点回收（--pending-timeout 3）")
     hk, gk = "W9EDGE000008", "W9EDGE000009"
     host = MockClient(hk, HOST, RELAY)
     host.recv()
@@ -251,7 +274,7 @@ def room_visible(stub):
 
 
 def case_ghost_room_not_published():
-    print("6) 房主不在中继上的房间不公开（幽灵房）")
+    print("7) 房主不在中继上的房间不公开（幽灵房）")
     kc = "W9EDGEGHOST1"
     stub = stub_u32(kc)
     code, _ = http("POST", "/recruit/start", recruit_body(kc, stub))
@@ -270,7 +293,7 @@ def case_ghost_room_not_published():
 
 
 def case_limits():
-    print("7) 开房限速 / 房间总数上限")
+    print("8) 开房限速 / 房间总数上限")
     srv = Server(pending_timeout=10, max_rooms=2)
     try:
         codes = []
@@ -306,6 +329,7 @@ def main():
         case_host_starts_without_waiting()
         case_repeated_retries()
         case_bad_keychip()
+        case_malformed_body()
         case_pending_timeout()
         case_ghost_room_not_published()
     finally:

@@ -16,6 +16,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
@@ -102,10 +103,23 @@ public static class Fingerprint
                 if (!m.HasBody) continue;
                 foreach (Instruction ins in m.Body.Instructions)
                 {
-                    if (ins.OpCode == OpCodes.Ldstr)
-                        l.Add("str " + m.FullName + " " + (ins.Operand == null ? "" : ins.Operand.ToString()));
-                    else if (ins.Operand is MethodReference)
-                        l.Add("call " + m.FullName + " -> " + ((MethodReference)ins.Operand).FullName);
+                    // 逐条 IL 都记：操作码 + 操作数（分支目标/switch 跳过 —— 那些是随
+                    // 代码布局变的偏移，不携带"行为"信息）。
+                    //
+                    // 为什么不能只记 ldstr / call（以前就是那样）：**数值完全不进指纹**。
+                    // 把 8000 改成 9000、把 `<` 改成 `>`、把 true 改成 false 这类改动，
+                    // IL 里只是 ldc.i4 / brtrue 的操作数变了，旧版会把"源码改了、
+                    // 发行版没重编"判成"指纹一致"—— 这层安全网就白设了。
+                    if (ins.OpCode.OperandType == OperandType.ShortInlineBrTarget ||
+                        ins.OpCode.OperandType == OperandType.InlineBrTarget ||
+                        ins.OpCode.OperandType == OperandType.InlineSwitch)
+                    {
+                        l.Add("il " + m.FullName + " " + ins.OpCode.Name);
+                        continue;
+                    }
+                    string operand = ins.Operand == null
+                        ? "" : Convert.ToString(ins.Operand, CultureInfo.InvariantCulture);
+                    l.Add("il " + m.FullName + " " + ins.OpCode.Name + " " + operand);
                 }
             }
         }

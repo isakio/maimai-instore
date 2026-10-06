@@ -218,6 +218,27 @@ def main():
                        "而文档让人拿它做验收）" % (fname, keyword, line.split("(")[0]))
     check(not bad, "被文档点名的验收日志行都是常显", "\n      ".join(bad))
 
+    # ---------------------------------------------------- 8. run_all 的步数
+    # 同一类坑的又一例：脚本从 8 步加到 10 步，几份文档里还写着"8 步"。
+    # 凡是**同一行里提到 run_all** 又写了"N 步"的，N 必须等于脚本里实际的步数。
+    print("8) run_all.sh 的步数")
+    run_all_text = read(os.path.join(ROOT, "tests", "run_all.sh"))
+    steps = len(re.findall(r'^\s*echo "########## \d+\.', run_all_text, re.M))
+    check(steps > 0, "从 run_all.sh 数出 %d 步" % steps)
+    bad = []
+    targets = md_files() + [os.path.join(ROOT, "tests", "run_release_check.sh")]
+    for path in targets:
+        if path == HISTORY:
+            continue
+        rel = os.path.relpath(path, ROOT)
+        for no, line in enumerate(read(path).splitlines(), 1):
+            if "run_all" not in line:
+                continue
+            for m in re.finditer(r"(\d+)\s*步", line):
+                if int(m.group(1)) != steps:
+                    bad.append("%s:%d 写着 %s 步，实际 %d" % (rel, no, m.group(1), steps))
+    check(not bad, "文档里提到的 run_all 步数和实际一致", "\n      ".join(bad))
+
     print()
     if FAIL:
         print("失败 %d 项：" % len(FAIL))
