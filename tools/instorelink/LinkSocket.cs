@@ -325,6 +325,18 @@ namespace InStoreLink
                 }
                 _client.Send(msg);
             }
+
+            // 监听用的影子 socket（_streamId == -1，只有 Bind 过端口）关掉时，把它在
+            // client 里注册的那条端口队列也摘掉：AcceptQ / UdpRecvQ 都是按端口建一次、
+            // 以前**从不删除** —— 本体每开一次联机会话就 Bind 一次新端口，这几张表只增不减。
+            // （接流造出来的 socket 也带着同一个 _bindPort，但它 _streamId != -1，
+            //   不会走到这里，不会误删还在用的监听队列。）
+            if (_streamId == -1 && _bindPort > 0)
+            {
+                ConcurrentQueue<LinkMsg> dropped;
+                _client.AcceptQ.TryRemove(_bindPort, out dropped);
+                _client.UdpRecvQ.TryRemove(_bindPort, out dropped);
+            }
         }
 
         public void Shutdown(SocketShutdown how)

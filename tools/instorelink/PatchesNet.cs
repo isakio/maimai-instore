@@ -441,6 +441,22 @@ namespace InStoreLink
             // 没影子 socket 就别拦着，让本体关掉它自己的真 socket（否则就是泄漏）
             if (shadow == null) return true;
             shadow.Close();
+            // 关掉之后把映射摘掉。以前这张表**只增不减**：本体每次联机会话都会新建
+            // listen / connect / accept 的 NFSocket，一局下来能攒几十上百条，而且一直
+            // 攥着那些 NFSocket 不放。
+            //
+            // 安全性：NFSocket.Close() 只是转发 `_nfSocket.Close()`（IL 看过），而 .NET 里
+            // 关掉的 Socket **不能再 Bind/Connect**。所以本体根本不可能复用同一个 NFSocket
+            // 对象（真复用的话它自己先抛 ObjectDisposedException）；关完还来找它的路径
+            // 都走 NoShadow 兜底（打一行警告 + 交回本体原生处理）。
+            LinkSocket dropped;
+            LinkRuntime.Redirect.TryRemove(__instance, out dropped);
+            // ★ 返回 false（拦下原方法），**不关本体那个真 socket** —— 这是有意的取舍：
+            //   映射已经摘掉了，万一之后还有残留的 Receive/Send（正常的生命周期不会，
+            //   但游戏状态机出错时可能），它会走 NoShadow 的原生路径：真 socket 还开着
+            //   就只是返回 WouldBlock（无害），真关了就是 ObjectDisposedException
+            //   （在 Unity 主线程抛出去 = 整局崩）。代价是本体会留着一个从没用过的
+            //   socket（每个接流会话一个，进程退出就回收）—— 宁可漏这点 fd，也不换崩溃风险。
             return false;
         }
 
@@ -451,6 +467,7 @@ namespace InStoreLink
             LinkSocket shadow = Shadow(__instance);
             if (shadow == null) return true;
             shadow.Shutdown(how);
+            // Shutdown 可能是"半关"（先关读、还要发）—— 不摘映射，等真正的 Close。
             return false;
         }
 

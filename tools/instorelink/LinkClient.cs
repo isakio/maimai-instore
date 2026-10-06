@@ -91,6 +91,7 @@ namespace InStoreLink
 
         private uint? _stubCache;
         private string _stubCacheKeychip;      // 上面那个缓存是按哪个 keychip 算出来的
+        private readonly object _stubLock = new object();
 
         public LinkClient(string keychip, string host, int port)
         {
@@ -109,13 +110,20 @@ namespace InStoreLink
                 // 要等刷卡登录（StartClient）才设进来。所以缓存必须跟着 keychip 走 ——
                 // 不然只要在刷卡之前有人读过一次（比如游戏调 Util.MyIpAddress），
                 // 这一局就会一直用错的身份，伪 IP 和中继那边对不上。
-                if (!_stubCache.HasValue || !string.Equals(_stubCacheKeychip, Keychip,
-                                                           StringComparison.Ordinal))
+                //
+                // 加锁：读它的除了游戏主线程，还有接收线程（每包日志里的 StubIp）和
+                // 建流线程；两个字段分开写，并发下可能"值是新的、缓存键是旧的"，
+                // 于是短暂算出错的伪 IP —— 而伪 IP 错了就是"目标不在线"。
+                lock (_stubLock)
                 {
-                    _stubCache = LinkStub.FromKeychip(Keychip);
-                    _stubCacheKeychip = Keychip;
+                    if (!_stubCache.HasValue || !string.Equals(_stubCacheKeychip, Keychip,
+                                                               StringComparison.Ordinal))
+                    {
+                        _stubCache = LinkStub.FromKeychip(Keychip);
+                        _stubCacheKeychip = Keychip;
+                    }
+                    return _stubCache.Value;
                 }
-                return _stubCache.Value;
             }
         }
 
@@ -170,7 +178,10 @@ namespace InStoreLink
         /// <summary>最近 20 次心跳的平均往返（ms），0 表示还没测出来。</summary>
         public long DelayAvg
         {
-            get { return _delayAvg; }
+            // 接收线程写、游戏主线程读（状态栏那行"延迟"）。long 在 32 位运行时不是
+            // 原子写，直接读可能读到一半新一半旧的值 —— 表现是状态栏偶尔闪一个荒谬的
+            // 延迟数字。Interlocked.Read / Exchange 两个方向都原子。
+            get { return Interlocked.Read(ref _delayAvg); }
         }
 
         public bool Stopping
@@ -376,7 +387,7 @@ namespace InStoreLink
                         sum += _delayWindow[i];
                         n++;
                     }
-                    _delayAvg = n == 0 ? 0 : sum / n;
+                    Interlocked.Exchange(ref _delayAvg, n == 0 ? 0 : sum / n);
                     LinkLog.Info("心跳 " + delay + "ms（均值 " + _delayAvg + "ms）");
                     break;
 

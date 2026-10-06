@@ -89,7 +89,7 @@
 ├── tests/                         ← 测试：协议单测 / 向量 / 端到端 / 兼容探针 / 参数名 / 发行版指纹 / 文档一致性
 │   ├── run_all.sh                 ← 一键跑全部（10 步）
 │   ├── ProtocolTests.cs           ← 协议层单测（不依赖游戏，能单独编出来跑）
-│   ├── GameCompatProbe.cs         ← 游戏兼容性探针（补丁目标 / 注入字段）
+│   ├── GameCompatProbe.cs         ← 游戏兼容性探针（补丁目标 / 注入字段 / 两个 mod 的反射名）
 │   └── py/                        ← 协议模型、真实日志反验、端到端、文档一致性
 ├── instorematchd/                 ← 自研联机服务端（大厅 + 中继，Python 标准库，零依赖）
 │   ├── install.sh                 ← 一键装（systemd）
@@ -116,7 +116,7 @@
 
 | 文件 | 干什么 | 校验 |
 | --- | --- | --- |
-| [`client/InStoreLink.dll`](client/InStoreLink.dll) | 联机本体：注册中继、开房、把对方的房间喂回游戏 | v0.3，57344 字节 / md5 `f208599696485b5dc2b5efbbc5487bf2` |
+| [`client/InStoreLink.dll`](client/InStoreLink.dll) | 联机本体：注册中继、开房、把对方的房间喂回游戏 | v0.3，57344 字节 / md5 `c25590d6497593a327ec05650141b747` |
 | [`client/InStoreMatch.dll`](client/InStoreMatch.dll) | 让选曲界面画出「店内マッチング」那一格 | v2.5，18432 字节 / md5 `1a94a9b6be9b03bfb274e41b0a8256b3` |
 
 两个文件都在本仓库的 [`client/`](client/) 里（[最新 Release](https://github.com/isakio/maimai-instore/releases/latest) 也附了），不用再去别的地方下。
@@ -248,7 +248,7 @@ sudo IMD_ADMIN_TOKEN='你的token' bash instorematchd/install.sh <你的域名�
 
 ## 更新记录
 
-**v0.3（`InStoreLink.dll`，57344 字节 / md5 `f208599696485b5dc2b5efbbc5487bf2`）**
+**v0.3（`InStoreLink.dll`，57344 字节 / md5 `c25590d6497593a327ec05650141b747`）**
 
 这一版专门修**"没按正常剧本走"的那些情况** —— 正常流程本来就能跑通，但这些岔路以前全是
 "只写一行日志就完事"，玩家侧表现为一直转圈或者莫名其妙掉线：

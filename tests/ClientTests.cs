@@ -90,6 +90,8 @@ public static class ClientTests
         TestCloseCancelsPending();
         TestJoinFailureWindow();
         TestCloseDropsQueuedAccept();
+        TestStreamKeysUnique();
+        TestBindQueuesReleasedOnClose();
 
         Console.WriteLine();
         Console.WriteLine("通过 " + _pass + " 项，失败 " + _fail + " 项");
@@ -180,6 +182,59 @@ public static class ClientTests
         LinkClient.ReportJoinFailure(key, "很久以前的失败");
         Thread.Sleep(3200);
         Check(LinkClient.TakeJoinFailure(key) == null, "超过保质期就丢掉");
+    }
+
+    /// <summary>
+    /// 同一轮里连开很多条流，key（流ID+本地端口）必须**互不相同**。
+    ///
+    /// 以前 ConnectAsync 每次 `new Random()`，用的是同一个时间种子 —— 同一 tick 内连着
+    /// 建两条流会拿到完全一样的 _streamId + _bindPort，后一条把前一条在 TcpRecvQ /
+    /// AcceptPending 里的记录覆盖掉（两条流串号，数据发到错的房间）。这条用例卡住它。
+    /// </summary>
+    private static void TestStreamKeysUnique()
+    {
+        Console.WriteLine("8) 连开 200 条流：流 key 不能重复（共享 Random + 锁）");
+        LinkClient c = NewClient("W9CLIENT0006");
+        LinkClient.Instance = c;      // LinkSocket 的构造函数走 LinkClient.Instance
+        System.Collections.Generic.HashSet<int> keys = new System.Collections.Generic.HashSet<int>();
+        int dup = 0;
+        for (int i = 0; i < 200; i++)
+        {
+            LinkSocket s = new LinkSocket(System.Net.Sockets.AddressFamily.InterNetwork,
+                System.Net.Sockets.SocketType.Stream, System.Net.Sockets.ProtocolType.Tcp, 0);
+            SocketAsyncEventArgs args = new SocketAsyncEventArgs();
+            args.RemoteEndPoint = new System.Net.IPEndPoint(
+                new System.Net.IPAddress(new byte[] { 203, 0, 113, 9 }), 50100);
+            if (!s.ConnectAsync(args, 0)) continue;
+            if (!keys.Add(s.StreamKey)) dup++;
+        }
+        Check(keys.Count == 200 && dup == 0,
+              "200 条流的 StreamKey 全不同（拿到 " + keys.Count + " 个，重复 " + dup + " 个）");
+    }
+
+    /// <summary>
+    /// 监听用的影子 socket 关掉时，它在 client 里注册的端口队列要一起摘掉。
+    /// 这几张表（AcceptQ / UdpRecvQ）以前**只增不减**：本体每开一次联机会话就 Bind 一个
+    /// 新端口，一局下来留一堆没人用的队列。
+    /// </summary>
+    private static void TestBindQueuesReleasedOnClose()
+    {
+        Console.WriteLine("9) 关掉监听 socket 时，端口队列要一起清掉");
+        LinkClient c = NewClient("W9CLIENT0007");
+        LinkClient.Instance = c;
+        LinkSocket udp = new LinkSocket(System.Net.Sockets.AddressFamily.InterNetwork,
+            System.Net.Sockets.SocketType.Dgram, System.Net.Sockets.ProtocolType.Udp, 0);
+        udp.Bind(new System.Net.IPEndPoint(System.Net.IPAddress.Loopback, 60011));
+        Check(c.UdpRecvQ.ContainsKey(60011), "Bind 之后 UdpRecvQ 里有这个端口");
+        udp.Close();
+        Check(!c.UdpRecvQ.ContainsKey(60011), "Close 之后 UdpRecvQ 里的端口被摘掉");
+
+        LinkSocket tcp = new LinkSocket(System.Net.Sockets.AddressFamily.InterNetwork,
+            System.Net.Sockets.SocketType.Stream, System.Net.Sockets.ProtocolType.Tcp, 0);
+        tcp.Bind(new System.Net.IPEndPoint(System.Net.IPAddress.Loopback, 60012));
+        Check(c.AcceptQ.ContainsKey(60012), "Bind 之后 AcceptQ 里有这个端口");
+        tcp.Close();
+        Check(!c.AcceptQ.ContainsKey(60012), "Close 之后 AcceptQ 里的端口被摘掉");
     }
 
     private static void TestCloseDropsQueuedAccept()

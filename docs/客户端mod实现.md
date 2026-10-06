@@ -19,7 +19,7 @@ tools/build_wsl.sh            ← WSL 侧构建（借用 Windows 的 csc.exe）
 tools/fingerprint.cs          ← 程序集指纹：判断发行版 dll 是不是当前源码编的
 tests/                        ← 测试：协议单测 / 向量 / 端到端 / 兼容探针 / 参数名 / 发行版指纹 / 文档一致性
 ├── ProtocolTests.cs          ← 协议层单测（不依赖游戏，能单独编出来跑）
-├── GameCompatProbe.cs        ← 游戏兼容性探针（补丁目标 / 注入字段类型）
+├── GameCompatProbe.cs        ← 游戏兼容性探针（补丁目标 / 注入字段 / 两个 mod 的反射名）
 ├── run_all.sh                ← 一键跑全部（10 步）
 └── py/{linkproto,test_vectors,test_e2e,test_docs}.py
 docs/客户端mod实现.md          ← 本文件
@@ -395,12 +395,12 @@ bash tests/run_all.sh        # 十步全跑，一分钟左右
 | --- | --- | --- |
 | 编译 | 源码 ↔ 游戏本体 API 是否对得上 | ✅ 通过（`build/InStoreLink.dll`） |
 | `tests/ProtocolTests.cs` | 序列化/解析往返、伪 IP、配置解析（36 项） | ✅ 全绿 |
-| `tests/ClientTests.cs` | **客户端逻辑**（脱离游戏跑）：建流挂起 / 接流成功、超时、CLOSE 取消、失败按流绑定（防串号）、失败条子的保质期、待 Accept 队列清理（20 项） | ✅ 全绿 |
+| `tests/ClientTests.cs` | **客户端逻辑**（脱离游戏跑）：建流挂起 / 接流成功、超时、CLOSE 取消、失败按流绑定（防串号）、失败条子的保质期、待 Accept 队列清理、连开 200 条流 key 不重复、监听 socket 关闭时端口队列一起清（25 项） | ✅ 全绿 |
 | `tests/py/test_vectors.py` | 同一批向量 + **用真实抓包日志反验**（17 项；给出 `MAIMAI_LOGS` 时 18 项） | ✅ 全绿（12 种真实报文全部能还原） |
 | `tests/py/test_e2e.py` | 起真的 instorematchd，跑完 开房→列表→建流→传数据→大包→关流→关房（19 项） | ✅ 全绿 |
 | `tests/py/test_edge.py` | **异常流程**：房主先开打 / 目标不在线 / 反复重试 / 挂起超时回收 / 身份校验 / 幽灵房不公开 / 限速与房间上限，外加每次拒绝都带原因、畸形请求体不能掐断连接（25 项） | ✅ 全绿 |
 | `tests/py/live_smoke.py` | **线上烟测**（不放进 `run_all.sh`，会往公开大厅临时开房）：对着真在跑的大厅把上面那些场景再走一遍，外加"第二个房客""房主中途掉线""房间 TTL vs 续报""幽灵房不公开""10 个房间选哪间进哪间"（25 项） | ✅ 全绿（打的就是 `isakio.cn`） |
-| `tests/GameCompatProbe.cs` | **游戏兼容性探针**：补丁目标方法是否存在、注入字段类型是否匹配、反射句柄拿不拿得到（60 项） | ✅ 全绿 |
+| `tests/GameCompatProbe.cs` | **游戏兼容性探针**：补丁目标方法是否存在、注入字段类型是否匹配、反射句柄拿不拿得到，外加 InStoreMatch 按字符串反射的那些名字（`SelectorTab._tabDatas` / `GenreSelectController.SortType2Genre` / `GameManager.<IsFreedomMode>k__BackingField` …）一起守着（81 项） | ✅ 全绿 |
 | `tools/check_patch_params.cs` | **参数名检查**：两个 dll 的补丁（InStoreLink 34 条 + InStoreMatch 8 个补丁方法）的普通参数名逐个和游戏对齐，外加 Prefix/Postfix 标注、`___字段` 是否存在（Harmony 是按名字传参的） | ✅ 全绿 |
 | `tools/fingerprint.cs` | **发行版指纹**：`client/` 里那两个 dll 是不是真的由当前源码编出来的（csc 输出不可复现，md5 比不出来） | ✅ 全绿 |
 | `tests/py/test_docs.py` | **文档一致性**：发行 dll 的字节数 / md5、Markdown 相对链接、补丁条数、旧名字残留、`third_party/` 里有没有二进制 | ✅ 全绿 |

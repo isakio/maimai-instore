@@ -487,24 +487,29 @@ namespace InStoreLink
             // 诊断：把"按了没反应"要看的那几个状态一次性打出来（组合变一次才打一行，
             // 免得像 1416 行/20 秒那样刷屏）。F=站在联机栏 C=IsConnectingMusic
             // R=有 RecruitData；H=房主 L=客户端 Q=请求中 N=已连接。
-            try
+            // ★ 整段都用 Verbose 包住：这几行本来只在 Debug=true 时才会打，但签名串是
+            //   每帧拼的 —— 玩家默认关着 Debug，等于每帧白造一堆字符串 + GC。
+            if (LinkLog.Verbose)
             {
-                string flags = (manager.IsHost() ? "H" : "-") + (manager.IsClient() ? "L" : "-")
-                             + (manager.IsRequest() ? "Q" : "-") + (manager.IsConnect() ? "N" : "-");
-                string sig = (__instance.IsConnectionFolder() ? "F" : "-")
-                           + (__instance.IsConnectingMusic ? "C" : "-")
-                           + (__instance.RecruitData != null ? "R" : "-")
-                           + " " + flags + " cur=" + __instance.CurrentMusicSelect
-                           + " rooms=" + (LinkRuntime.ConnectList == null ? -1 : LinkRuntime.ConnectList.Count)
-                           + " st=" + manager.GetCurrentStateID()
-                           + " joined=" + (LinkRuntime.JoinedRoomId ?? "-");
-                if (sig != LinkRuntime.LastStateSig)
+                try
                 {
-                    LinkRuntime.LastStateSig = sig;
-                    LinkLog.Info("选曲状态 " + sig);
+                    string flags = (manager.IsHost() ? "H" : "-") + (manager.IsClient() ? "L" : "-")
+                                 + (manager.IsRequest() ? "Q" : "-") + (manager.IsConnect() ? "N" : "-");
+                    string sig = (__instance.IsConnectionFolder() ? "F" : "-")
+                               + (__instance.IsConnectingMusic ? "C" : "-")
+                               + (__instance.RecruitData != null ? "R" : "-")
+                               + " " + flags + " cur=" + __instance.CurrentMusicSelect
+                               + " rooms=" + (LinkRuntime.ConnectList == null ? -1 : LinkRuntime.ConnectList.Count)
+                               + " st=" + manager.GetCurrentStateID()
+                               + " joined=" + (LinkRuntime.JoinedRoomId ?? "-");
+                    if (sig != LinkRuntime.LastStateSig)
+                    {
+                        LinkRuntime.LastStateSig = sig;
+                        LinkLog.Info("选曲状态 " + sig);
+                    }
                 }
+                catch (Exception) { /* 诊断而已，别让它影响正事 */ }
             }
-            catch (Exception) { /* 诊断而已，别让它影响正事 */ }
 
             // ── 按 BACK 从房间里退回房间列表之后，还能选别的房间 ──────────────────
             // 实测：进了第 2 间 → 按 BACK 回到房间列表（人已经出来了），再按第 1 间没反应。

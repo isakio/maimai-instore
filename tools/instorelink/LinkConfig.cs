@@ -67,6 +67,9 @@ namespace InStoreLink
             if (slash >= 0) s = s.Substring(0, slash);          // 去掉路径
 
             int colon = s.LastIndexOf(':');
+            // ":20101" 这种（只有端口、没有主机）以前会被当成主机名 ":20101"，
+            // 然后就是"连不上 → 每 3 秒重试"的死循环 + 刷日志。直接判成配置无效。
+            if (colon == 0) return false;
             if (colon > 0)
             {
                 string p = s.Substring(colon + 1);

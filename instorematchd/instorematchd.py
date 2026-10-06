@@ -914,20 +914,34 @@ def main():
     global STATE, HOST_OVERRIDE, RELAY_PORT, ADMIN_TOKEN, LOOP
     global PENDING_TIMEOUT, MAX_ROOMS
 
+    def positive(name):
+        def parse(text):
+            try:
+                n = int(text)
+            except ValueError:
+                raise argparse.ArgumentTypeError("%s 必须是整数，收到 %r" % (name, text))
+            if n < 1:
+                # 0 / 负数不是"关掉限制"，而是会把功能整个搞坏（比如 pending-timeout=0
+                # 会让每一次加入都立刻被回收，heartbeat-timeout=0 会让每个客户端一读就超时）。
+                # 与其静默地坏掉，不如启动时就报错。
+                raise argparse.ArgumentTypeError("%s 必须 >= 1，收到 %d" % (name, n))
+            return n
+        return parse
+
     ap = argparse.ArgumentParser(description="兼容 WorldLink/NyanLink 的联机服务端")
     ap.add_argument("--bind", default="0.0.0.0", help="监听地址（默认 0.0.0.0）")
-    ap.add_argument("--lobby-port", type=int, default=20100)
-    ap.add_argument("--relay-port", type=int, default=20101)
+    ap.add_argument("--lobby-port", type=positive("--lobby-port"), default=20100)
+    ap.add_argument("--relay-port", type=positive("--relay-port"), default=20101)
     ap.add_argument("--host-override", default="",
                     help="强制 /info 返回的中继主机名（走反代时必填，例如 maimai.example.com）")
-    ap.add_argument("--recruit-ttl", type=int, default=30,
+    ap.add_argument("--recruit-ttl", type=positive("--recruit-ttl"), default=30,
                     help="房间在这些秒内没有刷新就自动消失（默认 30）")
-    ap.add_argument("--heartbeat-timeout", type=int, default=30,
+    ap.add_argument("--heartbeat-timeout", type=positive("--heartbeat-timeout"), default=30,
                     help="多久没收到心跳就断开（默认 30 秒）")
-    ap.add_argument("--pending-timeout", type=int, default=PENDING_TIMEOUT,
+    ap.add_argument("--pending-timeout", type=positive("--pending-timeout"), default=PENDING_TIMEOUT,
                     help="建流请求多久没人接就回收、并回一条 CTL_TCP_CLOSE 给请求方"
                          "（默认 10 秒）")
-    ap.add_argument("--max-rooms", type=int, default=MAX_ROOMS,
+    ap.add_argument("--max-rooms", type=positive("--max-rooms"), default=MAX_ROOMS,
                     help="大厅同时在册的房间上限（默认 200）")
     ap.add_argument("--log-level", default="INFO",
                     choices=["DEBUG", "INFO", "WARNING", "ERROR"])

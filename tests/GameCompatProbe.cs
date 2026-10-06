@@ -195,6 +195,57 @@ public static class GameCompatProbe
         Type initParam = game.GetType("PartyLink.Party+InitParam") ?? game.GetType("PartyLink.Party.InitParam");
         Report(initParam != null, "PartyLink.Party.InitParam（构造补丁的参数类型）");
 
+        // ------------------------------------------------ InStoreMatch 按字符串反射的名字
+        // InStoreMatch 是另一个 dll，但它大量**按字符串**反射游戏里的类型 / 字段 / 方法：
+        // 名字写错或游戏更新改了名，它只会静默失效（那一格画不出来 / 箭头点不动），
+        // 而且它自己没有探针 —— 所以这些名字一起在这里守着。
+        Console.WriteLine();
+        Console.WriteLine("四、InStoreMatch 按字符串反射的名字");
+        Type selectorTab = T(game, "SelectorTab");
+        Type miniPanel = T(game, "MiniTabPanel");
+        Type mainPanel = T(game, "MainTabPanel");
+        Type tabController = T(game, "TabController");
+        // _genreTabController 的运行期类型是 GenreSelectController；SortType2Genre 挂在它身上
+        // （Change 在基类 TabController 上）。InStoreMatch 用的是"沿基类找"的 FindByName，
+        // 所以这里也沿基类找。
+        Type genreSelectController = T(game, "GenreSelectController");
+        // GenreSelectData 是 MusicSelectProcess 的**嵌套类型**（和 CombineMusicSelectData 一样），
+        // Assembly.GetType("GenreSelectData") 找不到它。
+        Type genreData = musicSelect == null ? null
+            : musicSelect.GetNestedType("GenreSelectData", BindingFlags.Public | BindingFlags.NonPublic);
+        if (genreData == null) genreData = T(game, "GenreSelectData");
+        Type musicMonitor = T(game, "Monitor.MusicSelectMonitor");
+        Type gameManager = game.GetType("Manager.GameManager");
+
+        Field(selectorTab, "_tabDatas", "List<TabDataBase>（重拍标签栏就靠它）");
+        Field(selectorTab, "_leftPanels", "数组（读回屏幕上每格实际显示的文字）");
+        Field(selectorTab, "_rightPanels", "数组");
+        Field(selectorTab, "_main", "中央格子对象");
+        Field(miniPanel, "_categoryNameText", "TextMeshProUGUI");
+        Field(mainPanel, "_subTitleText", "TextMeshProUGUI");
+        Field(musicMonitor, "_genreTabController", "TabController（标签栏控制器）");
+        FieldAny(genreData, "categoryID", "int（认哪一格是 198）");
+        FieldStatic(gameManager, "<IsFreedomMode>k__BackingField",
+                    "bool（面板右键临时借用 freedom 分支）");
+        Report(T(game, "TabDataBase") != null, "类型 TabDataBase（_tabDatas 的元素类型）");
+
+        MethodArgs(musicMonitor, "SetVisibleButton", 2, "Monitor.SetVisibleButton(id, ButtonSetting)");
+        MethodArgs(musicMonitor, "GetTabSprite", 1, "Monitor.GetTabSprite(GenreSelectData)");
+        MethodArgs(musicMonitor, "getTabString", 1, "Monitor.getTabString(GenreSelectData)");
+        MethodArgs(musicMonitor, "getTabColor", 1, "Monitor.getTabColor(GenreSelectData)");
+        MethodInHierarchy(genreSelectController, "SortType2Genre", 2,
+                          "标签栏重拍：SortType2Genre(list, 0)（在 GenreSelectController 上）");
+        MethodInHierarchy(tabController, "Change", 1, "标签栏重拍：Change(index)");
+        Report(PropExists(musicSelect, "GenreSelectDataList"),
+               "MusicSelectProcess.GenreSelectDataList（每台监视器一份）");
+        Report(PropExists(musicSelect, "CategoryNameList"),
+               "MusicSelectProcess.CategoryNameList（滚动边界用它的 Count）");
+        Report(PropExists(musicSelect, "CurrentCategorySelect"),
+               "MusicSelectProcess.CurrentCategorySelect");
+        Report(PropExists(musicSelect, "MonitorArray"), "MusicSelectProcess.MonitorArray");
+        Report(PropExists(musicSelect, "CombineMusicDataList"),
+               "MusicSelectProcess.CombineMusicDataList（面板右箭头按它数格子）");
+
         if (_dumpSignatures)
         {
             Console.WriteLine();
@@ -291,6 +342,75 @@ public static class GameCompatProbe
             return;
         }
         Report(true, t.Name + "." + name + " = " + Pretty(f.FieldType) + note);
+    }
+
+    /// <summary>静态字段（InStoreMatch 读 GameManager.&lt;IsFreedomMode&gt;k__BackingField 用）。</summary>
+    private static void FieldStatic(Type t, string name, string expected)
+    {
+        if (t == null) { Report(false, name); return; }
+        FieldInfo f = t.GetField(name, BindingFlags.Public | BindingFlags.NonPublic |
+                                       BindingFlags.Static);
+        if (f == null)
+        {
+            Report(false, t.Name + "." + name + " ← 不存在（期望 " + expected + "）");
+            return;
+        }
+        Report(true, t.Name + "." + name + " = " + Pretty(f.FieldType) + "（static）");
+    }
+
+    /// <summary>实例字段，public / private 都要认（游戏里两种都有）。</summary>
+    private static void FieldAny(Type t, string name, string expected)
+    {
+        if (t == null) { Report(false, name); return; }
+        FieldInfo f = t.GetField(name, BindingFlags.Public | BindingFlags.NonPublic |
+                                       BindingFlags.Instance);
+        if (f == null)
+        {
+            Report(false, t.Name + "." + name + " ← 不存在（期望 " + expected + "）");
+            return;
+        }
+        Report(true, t.Name + "." + name + " = " + Pretty(f.FieldType));
+    }
+
+    /// <summary>按"名字 + 参数个数"找一个方法 —— 反射调用就是这么找的。</summary>
+    private static void MethodArgs(Type t, string name, int argc, string why)
+    {
+        if (t == null) { Report(false, why); return; }
+        const BindingFlags flags = BindingFlags.Public | BindingFlags.NonPublic |
+                                   BindingFlags.Instance | BindingFlags.Static;
+        foreach (MethodInfo m in t.GetMethods(flags))
+        {
+            if (m.Name == name && m.GetParameters().Length == argc) { Report(true, why); return; }
+        }
+        Report(false, why + " ← 找不到 " + name + "(" + argc + " 个参数)");
+    }
+
+    /// <summary>沿"自己 → 基类"找方法（InStoreMatch 的 FindByName 就是这么找的）。</summary>
+    private static void MethodInHierarchy(Type t, string name, int argc, string why)
+    {
+        if (t == null) { Report(false, why); return; }
+        const BindingFlags flags = BindingFlags.Public | BindingFlags.NonPublic |
+                                   BindingFlags.Instance | BindingFlags.Static |
+                                   BindingFlags.DeclaredOnly;
+        for (Type cur = t; cur != null; cur = cur.BaseType)
+        {
+            foreach (MethodInfo m in cur.GetMethods(flags))
+            {
+                if (m.Name == name && m.GetParameters().Length == argc) { Report(true, why); return; }
+            }
+        }
+        Report(false, why + " ← 自己+基类里都找不到 " + name + "(" + argc + " 个参数)");
+    }
+
+    /// <summary>属性存不存在（getter / setter 有任何一个就算）。</summary>
+    private static bool PropExists(Type t, string name)
+    {
+        if (t == null) return false;
+        const BindingFlags flags = BindingFlags.Public | BindingFlags.NonPublic |
+                                   BindingFlags.Instance | BindingFlags.Static;
+        return t.GetProperty(name, flags) != null ||
+               t.GetMethod("get_" + name, flags) != null ||
+               t.GetMethod("set_" + name, flags) != null;
     }
 
     /// <summary>检查 get() 的返回类型上有没有这个方法（DeliveryChecker.get().start(...) 这种）。</summary>
