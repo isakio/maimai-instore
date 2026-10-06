@@ -222,13 +222,16 @@ def case_bad_keychip():
     raw.settimeout(5)
     raw.sendall(b"1,1\n")                      # 只有 cmd=1，没有 keychip
     time.sleep(0.3)
-    got = b"?"
+    # 服务端关连接时，客户端可能是干净 EOF（recv 回 b""），也可能因为"我们还有没发完的数据"
+    # 收到 RST（recv 抛异常）。两种都算"服务端把这条连接断了" —— 只认 b"" 会偶发假红（踩过）。
+    closed, got = False, b"?"
     try:
         got = raw.recv(64)
+        closed = (got == b"")
     except Exception:
-        pass
+        closed = True
     raw.close()
-    check(got == b"", "不带 keychip 的注册 → 服务端直接关掉这条连接（收到 %r）" % got)
+    check(closed, "不带 keychip 的注册 → 服务端直接关掉这条连接（收到 %r）" % got)
 
     # 一直不注册、只是狂发消息：以前每条都打一句 warning（公开端口能把日志刷爆），
     # 现在限流成最多 3 条 + 断开这条连接。
@@ -240,13 +243,14 @@ def case_bad_keychip():
     except Exception:
         pass
     time.sleep(0.5)
-    got = b"?"
+    closed, got = False, b"?"
     try:
         got = raw.recv(64)
+        closed = (got == b"")
     except Exception:
-        pass
+        closed = True
     raw.close()
-    check(got == b"", "不注册狂发消息 → 限流后断开（收到 %r）" % got)
+    check(closed, "不注册狂发消息 → 限流后断开（收到 %r）" % got)
 
 
 def case_malformed_body():

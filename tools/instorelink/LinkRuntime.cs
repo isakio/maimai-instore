@@ -44,6 +44,14 @@ namespace InStoreLink
         /// <summary>MusicSelectProcess.IsConnectCategoryEnable 的 setter（永远置 false，留着给以后用）。</summary>
         public static MethodInfo SetConnectCategoryEnable;
 
+        /// <summary>
+        /// MusicSelectProcess.SetConnectData()：把"大厅房间"翻译成本体的歌曲列表。
+        /// 游戏只在少数几个时刻自己调它（进选曲界面初始化 / 无房间时收尾），
+        /// 房间列表**事后变化**时得我们自己调一次重画 —— 见 PatchesParty.PostPartyExec。
+        /// 调它仍然会走我们的 Prefix（ApplyConnectData），等于用游戏自己的入口重画。
+        /// </summary>
+        public static MethodInfo SetConnectDataGame;
+
         /// <summary>上一次招募列表快照，key = "伪IP : 曲目ID"。</summary>
         public static Dictionary<string, RecruitInfo> LastRecruits = new Dictionary<string, RecruitInfo>();
 
@@ -56,7 +64,12 @@ namespace InStoreLink
         public static List<RecruitInfo> ConnectList;
 
         public static int OnlineUserCount;
-        public static int MusicIdSum;
+        /// <summary>
+        /// 上一次"真正该显示的房间集合"签名（按 Identity 排序拼起来）。
+        /// 房间集合变了就重画歌曲列表 —— 用签名而不是"曲目 ID 之和"：
+        /// 一关一开（同一首歌、不同房主）时和是不变的，签名会变。
+        /// </summary>
+        public static string RoomSignature;
         public static bool SideMessageFlag;
         /// <summary>
         /// 上一次真正写进 MusicSelectProcess.RecruitData 的房间（Identity 字符串）。
@@ -128,6 +141,10 @@ namespace InStoreLink
 
             PropertyInfo categoryEnable = typeof(MusicSelectProcess).GetProperty("IsConnectCategoryEnable");
             if (categoryEnable != null) SetConnectCategoryEnable = categoryEnable.GetSetMethod(true);
+
+            SetConnectDataGame = typeof(MusicSelectProcess).GetMethod("SetConnectData",
+                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+            if (SetConnectDataGame == null) LinkLog.Error("找不到 MusicSelectProcess.SetConnectData（房间列表事后变化时没法重画）");
 
             Client = new LinkClient("A1234567890", "", LinkConfig.DefaultRelayPort);
             LinkClient.Instance = Client;

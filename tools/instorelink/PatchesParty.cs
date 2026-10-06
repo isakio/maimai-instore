@@ -274,6 +274,22 @@ namespace InStoreLink
             return false;
         }
 
+        /// <summary>
+        /// 房间集合的签名：每间的 Identity 排序后拼起来。只用来判断"该显示的房间集合变了没有"。
+        /// </summary>
+        private static string RoomSignatureOf(List<RecruitInfo> rooms)
+        {
+            if (rooms == null || rooms.Count == 0) return "";
+            List<string> ids = new List<string>();
+            foreach (RecruitInfo r in rooms)
+            {
+                if (r == null) continue;
+                ids.Add(LinkRuntime.Identity(r));
+            }
+            ids.Sort(StringComparer.Ordinal);
+            return string.Join("|", ids.ToArray());
+        }
+
         /// <summary>list 里的每个房间是否都还在 fresh 里（用来判断"显示快照"有没有过期）。</summary>
         private static bool AllRoomsIn(List<RecruitInfo> list, List<RecruitInfo> fresh)
         {
@@ -432,7 +448,7 @@ namespace InStoreLink
         public static bool PreMusicSelectOnStart(MusicSelectProcess __instance)
         {
             // 每次进选曲界面重置状态（上游同款：房间列表变了要重新刷新）
-            LinkRuntime.MusicIdSum = 0;
+            LinkRuntime.RoomSignature = null;       // 进选曲界面重置：第一次站到那一栏时会重画一次
             LinkRuntime.SideMessageFlag = false;
             // 还要把"上次选中的那一间"松开。否则进了某间房再退出来，之后怎么按都还是那一间
             // （玩家实测：进第 2 间 → 退出 → 再按哪儿都连第 2 间）。
@@ -567,14 +583,27 @@ namespace InStoreLink
                              + (rows == null ? 0 : rows.Count) + " 间）");
             }
 
-            // 房间列表有变化（曲目 ID 之和变了）→ 让本体重画列表
-            List<RecruitInfo> withoutMe = manager.GetRecruitListWithoutMe();
-            int sum = 0;
-            foreach (RecruitInfo r in withoutMe) sum += r.MusicID;
-            if (LinkRuntime.MusicIdSum != sum)
+            // 房间列表有变化（曲目 ID 之和变了）→ **真的重画**歌曲列表。
+            //
+            // 为什么必须自己调 SetConnectData：歌曲列表（_connectCombineMusicDataList）只有游戏
+            // 自己调 SetConnectData 时才会重建，而游戏只在"进选曲界面初始化"和"房间列表变空收尾"
+            // 这两个时刻调它。于是"人已经站在这一栏里、房间才出现"这种最常见的情况（朋友后来才开房）
+            // 永远不刷新 —— 玩家看到的是**那一栏一直是空的**（真机实测：15:32 进界面时没房间，
+            // 15:41 房间才来，界面再也没变过，`connectList=1` 那个空占位格一直挂着）。
+            //
+            // 只在"人就在联机栏里"时重画（别去打扰普通分类的列表），而且只在**签名变化**时重画一次
+            // （不会每帧重建、不会像以前那样把光标按一次弹回第 0 项）。不在栏里时故意不更新签名，
+            // 这样等玩家走进这一栏时会自动重画一次，保证看到的是最新的房间。
+            string roomSig = RoomSignatureOf(manager.GetRecruitListWithoutMe());
+            if (__instance.IsConnectionFolder() && LinkRuntime.RoomSignature != roomSig)
             {
-                LinkRuntime.MusicIdSum = sum;
-                __instance.IsConnectingMusic = false;
+                LinkRuntime.RoomSignature = roomSig;
+                LinkRuntime.LastRecruitId = null;      // 重建后让 PreIsConnectStart 重新对准一次
+                if (LinkRuntime.SetConnectDataGame != null)
+                {
+                    try { LinkRuntime.SetConnectDataGame.Invoke(__instance, null); }
+                    catch (Exception ex) { LinkLog.Debug("重画联机歌曲列表出错：" + ex.Message); }
+                }
             }
 
             if (__instance.IsConnectingMusic && __instance.RecruitData != null &&
