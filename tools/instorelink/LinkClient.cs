@@ -315,8 +315,15 @@ namespace InStoreLink
                 Thread send = _sendThread, recv = _recvThread;
                 _sendThread = null;
                 _recvThread = null;
-                if (send != null) { try { send.Abort(); } catch (Exception) { } }
-                if (recv != null) { try { recv.Abort(); } catch (Exception) { } }
+                // ★ 别 Abort **当前线程**：Reconnect 就是从 SendLoop/RecvLoop 里调出来的，
+                //   而 Thread.Abort() 抛的 ThreadAbortException 即使被 catch 住，也会在
+                //   catch 末尾被运行时自动重抛 —— 于是这个线程当场死掉，下面那句
+                //   ConnectAsync() 根本执行不到，"断开后自动重连"整条路是死的
+                //   （表现：中继断一次之后客户端就再也不收发，日志里也没有重连记录）。
+                //   当前线程本来就该返回了（调用点在循环末尾），让它自然结束即可。
+                Thread self = Thread.CurrentThread;
+                if (send != null && send != self) { try { send.Abort(); } catch (Exception) { } }
+                if (recv != null && recv != self) { try { recv.Abort(); } catch (Exception) { } }
             }
             finally
             {

@@ -14,6 +14,7 @@ using System;
 using System.IO;
 using System.Net;
 using System.Text;
+using System.Threading;
 
 namespace InStoreLink
 {
@@ -70,40 +71,39 @@ namespace InStoreLink
         public static void PostAsync(string url, string body, Action<string, Exception> callback)
         {
             if (string.IsNullOrEmpty(url)) return;
-            try
+            // 用 HttpWebRequest + 线程池，而不是 WebClient.UploadStringAsync：
+            // WebClient 自己设不了超时，大厅要是"收了包不回"，这次 POST 就永远挂着 ——
+            // 而"房间续报"每 10 秒发一次，挂几次就把 socket/线程耗光（GET 那条路
+            // 早就因为同样的原因改成 HttpWebRequest 了，POST 这条一直漏着）。
+            ThreadPool.QueueUserWorkItem(delegate(object state)
             {
-                WebClient web = NewWebClient();
-                web.Headers["Content-Type"] = "application/json";
-                web.UploadStringCompleted += delegate(object sender, UploadStringCompletedEventArgs e)
+                try
                 {
-                    try
+                    HttpWebRequest request = (HttpWebRequest)WebRequest.Create(new Uri(url));
+                    request.Method = "POST";
+                    request.Proxy = null;                       // 直连场景别走系统代理
+                    request.ContentType = "application/json";
+                    request.Timeout = TimeoutMs;
+                    request.ReadWriteTimeout = TimeoutMs;
+                    byte[] data = new UTF8Encoding(false).GetBytes(body ?? "");
+                    request.ContentLength = data.Length;
+                    using (Stream s = request.GetRequestStream())
                     {
-                        if (callback == null) return;
-                        // e.Error != null 时读 e.Result 会直接把那个异常抛出来（AsyncCompletedEventArgs
-                        // 的既定行为），所以必须先看 Error 再取 Result。
-                        if (e.Error != null) callback(null, e.Error);
-                        else if (e.Cancelled) callback(null, new OperationCanceledException(url));
-                        else callback(e.Result, null);
+                        s.Write(data, 0, data.Length);
                     }
-                    finally
+                    using (WebResponse response = request.GetResponse())
+                    using (Stream stream = response.GetResponseStream())
+                    using (StreamReader reader = new StreamReader(stream, new UTF8Encoding(false)))
                     {
-                        web.Dispose();
+                        string text = reader.ReadToEnd();
+                        if (callback != null) callback(text, null);
                     }
-                };
-                web.UploadStringAsync(new Uri(url), body ?? "");
-            }
-            catch (Exception ex)
-            {
-                if (callback != null) callback(null, ex);
-            }
-        }
-
-        private static WebClient NewWebClient()
-        {
-            WebClient web = new WebClient();
-            web.Encoding = new UTF8Encoding(false);
-            web.Proxy = null;                        // 局域网/直连场景下别走系统代理
-            return web;
+                }
+                catch (Exception ex)
+                {
+                    if (callback != null) callback(null, ex);
+                }
+            });
         }
     }
 }

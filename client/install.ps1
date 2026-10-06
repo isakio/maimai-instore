@@ -138,8 +138,8 @@ Write-Host ""
 Write-Host "（如果 $mods\ 里还留着别的新旧同名插件，手动删掉，免得同一套补丁打两遍）" -ForegroundColor Yellow
 Write-Host ""
 Write-Host "启动游戏后看 MelonLoader\Logs\Latest.log，应出现：" -ForegroundColor Cyan
-Write-Host '  [InStoreLink] ... 已加载   和   33 行 [InStoreLink]   ✓ 补丁名 → 目标方法'
-Write-Host '  [InStoreLink] 挂钩完成，共 33 条生效'
+Write-Host '  [InStoreLink] ... 已加载   和   34 行 [InStoreLink]   ✓ 补丁名 → 目标方法'
+Write-Host '  [InStoreLink] 挂钩完成，共 34 条生效'
 Write-Host "  [InStoreMatch] v... 已加载  和 7 行 [InStoreMatch] 挂钩成功"
 Write-Host '（出现 ✗ 或"挂钩失败"的话，多半是游戏版本不是 SDEZ 1.70）' -ForegroundColor Yellow
 Write-Host ""

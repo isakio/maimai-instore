@@ -30,6 +30,10 @@ namespace InStoreLink
         private readonly LinkClient _client;
         private readonly int _proto;
 
+        // 流 ID / 本地端口用共享 Random 生成；Random 本身不是线程安全的，统一加锁
+        private static readonly Random Rand = new Random();
+        private static readonly object RandLock = new object();
+
         public EndPoint RemoteEndPoint { get; private set; }
 
         /// <summary>
@@ -149,9 +153,17 @@ namespace InStoreLink
             // 本机会把 127.0.0.1/localhost 当成自己，换成伪 IP
             if (addr == 2130706433u || addr == 16777343u) addr = _client.StubIp;
 
-            Random random = new Random();
-            _streamId = random.Next();
-            _bindPort = random.Next(RandomPortMin, RandomPortMax);
+            // 用共享的 Random（加锁）：以前每次 new Random() 用的是同一个时间种子，
+            // 同一帧里连着建两条流会拿到**同一个** _streamId + _bindPort 组合，
+            // 后一条会把前一条在 TcpRecvQ / AcceptPending 里的记录覆盖掉（两条流串号）。
+            int sid, port;
+            lock (RandLock)
+            {
+                sid = Rand.Next();
+                port = Rand.Next(RandomPortMin, RandomPortMax);
+            }
+            _streamId = sid;
+            _bindPort = port;
 
             int key = _streamId + _bindPort;
             _client.TcpRecvQ[key] = new ConcurrentQueue<LinkMsg>();

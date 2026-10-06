@@ -23,7 +23,7 @@ if [ ! -f "$CECIL_WSL" ]; then
     exit 1
 fi
 # 要查哪些程序集：
-#   两个 dll 都查：InStoreLink（33 条补丁）+ InStoreMatch（7 条，补丁类是嵌套的）
+#   两个 dll 都查：InStoreLink（34 条补丁）+ InStoreMatch（8 个补丁方法，补丁类是嵌套的）
 #   build/  —— 刚编出来的，源码一改就能第一时间发现回归
 #   client/ —— 真正发给用户的那一份，能发现"源码改了但忘了重编发行版"
 # 存在的就查；只要求至少有一个，方便单独跑源码那份。

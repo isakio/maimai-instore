@@ -247,9 +247,14 @@ class State:
             ]
             recruits = [
                 {
-                    "host": (r["rec"].get("RecruitInfo", {}).get("MechaInfo", {}) or {}).get("UserNames", [None])[0],
+                    # 注意 `.get("UserNames", [None])` 在"字段存在但是空列表"时会返回 []，
+                    # 再取 [0] 就是 IndexError —— 而 snapshot() 是 /online 和看板共用的，
+                    # 一个不怀好意的 POST（UserNames: []）就能把 /online 打成 500。
+                    # 所以统一写成 `(... or [None])[0]`。
+                    "host": ((r["rec"].get("RecruitInfo", {}).get("MechaInfo", {}) or {})
+                             .get("UserNames") or [None])[0],
                     "music_id": r["rec"].get("RecruitInfo", {}).get("MusicID")
-                                or r["rec"].get("RecruitInfo", {}).get("MechaInfo", {}).get("MusicID"),
+                                or (r["rec"].get("RecruitInfo", {}).get("MechaInfo", {}) or {}).get("MusicID"),
                     "difficulty": ((r["rec"].get("RecruitInfo", {}).get("MechaInfo", {}) or {}).get("FumenDifs") or [None])[0],
                     "age": round(time.time() - r["ts"], 1),
                     "stub": stub_to_ip(k),
@@ -376,6 +381,14 @@ class RelayClient:
             return
 
         target = self.find_target(msg)
+        # 关流必须在 find_target 之前处理：对端已经离线时 find_target 会返回 None，
+        # 走下面那条"目标不在线"就 return 了 —— 结果**本端的流表 / 挂起表都不清**，
+        # 只会越攒越多（sid 还占着，将来撞上就是"流ID 重复使用"）。反正关流本来
+        # 就不需要目标在线：能通知就通知，通知不到也要把自己这边擦干净。
+        if cmd == CMD_TCP_CLOSE:
+            await self._handle_close(msg)
+            return
+
         if target is None:
             LOG.warning("命令 %s 的目标不在线（dst=%s sid=%s）",
                         CMD_NAMES.get(cmd, cmd),
@@ -444,33 +457,35 @@ class RelayClient:
                                         src=self.stub, sport=msg["sport"],
                                         dst=target.stub, dport=msg["dport"]))
 
-        elif cmd == CMD_TCP_CLOSE:
-            # ← 原版这里直接忽略，导致流表只增不减
-            sid = msg["sid"]
-            peer = None
-            if sid is not None:
-                peer_stub = self.streams.pop(sid, None)
-                info = self.pending.pop(sid, None)
-                if peer_stub is None and info is not None:
-                    peer_stub = info.get("peer")        # 还没 Accept 就取消了
-                if peer_stub is not None:
-                    with STATE.lock:
-                        peer = STATE.clients.get(peer_stub)
-                    if peer is not None:
-                        peer.streams.pop(sid, None)
-                        peer.pending.pop(sid, None)
-            LOG.debug("关流 %s（对端 %s）", sid,
-                      peer.keychip if peer else "已离线")
-            # 转发给对端：以前只清服务端的两张流表就走了，两边的游戏都不知道
-            # 这条流已经没了，会一直攥着它继续发数据。
-            if peer is not None and peer is not self:
-                await peer.send(close_msg(msg["proto"], sid,
-                                          self.stub, msg["sport"],
-                                          peer.stub, msg["dport"],
-                                          reason=msg["data"] or "对端关闭了流"))
-
         else:
             LOG.debug("未处理的命令: %s", cmd)
+
+    async def _handle_close(self, msg: dict):
+        """处理 CTL_TCP_CLOSE：先擦干净自己这边的两张表，再尽力通知对端。
+
+        ← 原版这里直接忽略，导致流表只增不减（涨到上限就踢人）。
+        """
+        sid = msg["sid"]
+        peer = None
+        if sid is not None:
+            peer_stub = self.streams.pop(sid, None)
+            info = self.pending.pop(sid, None)
+            if peer_stub is None and info is not None:
+                peer_stub = info.get("peer")        # 还没 Accept 就取消了
+            if peer_stub is not None:
+                with STATE.lock:
+                    peer = STATE.clients.get(peer_stub)
+                if peer is not None:
+                    peer.streams.pop(sid, None)
+                    peer.pending.pop(sid, None)
+        LOG.debug("关流 %s（对端 %s）", sid, peer.keychip if peer else "已离线")
+        # 转发给对端：以前只清服务端的两张流表就走了，两边的游戏都不知道
+        # 这条流已经没了，会一直攥着它继续发数据。
+        if peer is not None and peer is not self:
+            await peer.send(close_msg(msg["proto"], sid,
+                                      self.stub, msg["sport"],
+                                      peer.stub, msg["dport"],
+                                      reason=msg["data"] or "对端关闭了流"))
 
 
 async def pending_sweeper(interval: float = 1.0):
@@ -570,6 +585,18 @@ async def relay_serve(host: str, port: int, heartbeat_timeout: int,
         finally:
             await client.close()
             if client.stub is not None and STATE is not None:
+                # 这个客户端掉线了，但别人的 streams / pending 里还留着指向它的条目 ——
+                # 不清掉就是一张永远不缩的僵尸表（而且它会一直把这些人的流 ID 占着）。
+                with STATE.lock:
+                    others = list(STATE.clients.values())
+                for other in others:
+                    if other is client:
+                        continue
+                    for sid in [s for s, peer in other.streams.items() if peer == client.stub]:
+                        other.streams.pop(sid, None)
+                    for sid, info in list(other.pending.items()):
+                        if info.get("peer") == client.stub:
+                            other.pending.pop(sid, None)
                 with STATE.lock:
                     if STATE.clients.get(client.stub) is client:
                         STATE.clients.pop(client.stub, None)

@@ -23,7 +23,7 @@
 >
 > 代码是我们写的，但**协议与大量游戏侧机制来自上游的逆向成果**：署名（MIT，
 > Copyright (c) 2025 Azalea）与出处保留在 [`third_party/NyanLink/`](third_party/NyanLink/README.md)，
-> 完整的协议规格、上游源码导读、与游戏本体的 33 个耦合点都在
+> 完整的协议规格、上游源码导读、与游戏本体的 34 个耦合点都在
 > [`docs/客户端mod实现.md`](docs/客户端mod实现.md)。
 > 想用"直接跑上游二进制"的老方案，看分支
 > [`legacy-worldlink`](https://github.com/isakio/maimai-instore/tree/legacy-worldlink)。
@@ -116,7 +116,7 @@
 
 | 文件 | 干什么 | 校验 |
 | --- | --- | --- |
-| [`client/InStoreLink.dll`](client/InStoreLink.dll) | 联机本体：注册中继、开房、把对方的房间喂回游戏 | v0.3，55808 字节 / md5 `efade648816604a2efc23ae30e8faa84` |
+| [`client/InStoreLink.dll`](client/InStoreLink.dll) | 联机本体：注册中继、开房、把对方的房间喂回游戏 | v0.3，57344 字节 / md5 `f208599696485b5dc2b5efbbc5487bf2` |
 | [`client/InStoreMatch.dll`](client/InStoreMatch.dll) | 让选曲界面画出「店内マッチング」那一格 | v2.5，18432 字节 / md5 `1a94a9b6be9b03bfb274e41b0a8256b3` |
 
 两个文件都在本仓库的 [`client/`](client/) 里（[最新 Release](https://github.com/isakio/maimai-instore/releases/latest) 也附了），不用再去别的地方下。
@@ -248,7 +248,7 @@ sudo IMD_ADMIN_TOKEN='你的token' bash instorematchd/install.sh <你的域名�
 
 ## 更新记录
 
-**v0.3（`InStoreLink.dll`，55808 字节 / md5 `efade648816604a2efc23ae30e8faa84`）**
+**v0.3（`InStoreLink.dll`，57344 字节 / md5 `f208599696485b5dc2b5efbbc5487bf2`）**
 
 这一版专门修**"没按正常剧本走"的那些情况** —— 正常流程本来就能跑通，但这些岔路以前全是
 "只写一行日志就完事"，玩家侧表现为一直转圈或者莫名其妙掉线：

@@ -191,7 +191,17 @@ namespace InStoreLink
             {
                 if (r != null && IsMyOwnRoom(r)) { mine = r; break; }
             }
-            if (mine == null) return;                             // 我没在招募，没什么可续的
+            if (mine == null)
+            {
+                // 我没在招募。**把续报计时也一起清掉**：否则停了一会儿之后再开一间
+                // 同身份（同 keychip + 同曲目 = 同一个 Identity）的房间时，_refreshKey
+                // 还是相等的，计时不会重置 —— 要是上一间已经续过 10 分钟，这一开出来
+                // 就立刻"续报超时收手"，房间 30 秒后在大厅里悄悄消失。
+                _refreshKey = null;
+                _refreshSince = -1f;
+                _refreshGaveUp = false;
+                return;
+            }
 
             // 保险：本体什么时候把"我的房间"从列表里去掉，我们没法 100% 确定。
             // 万一某条路径不发 FinishRecruit，续报就会让一条已经没用的房间永远挂在
@@ -430,16 +440,36 @@ namespace InStoreLink
             return true;
         }
 
-        /// <summary>把"当前选中的房间 / 联机列表状态"清干净，让下一轮选择从零开始。</summary>
+        /// <summary>
+        /// 把"当前选中的那一间"松开：RecruitData 置空、IsConnectingMusic 复位，
+        /// 让下一轮选择从零开始。
+        ///
+        /// **不要把 ConnectList 清空** —— 它记的是"上一次真正画出来的房间顺序"，
+        /// 退出房间再进来时列表往往还没重建，一清掉 RecruitData getter 就没房间可取，
+        /// 玩家表现就是"按了没反应"（踩过：清了它的那版 efade648，进第 2 间→退出→
+        /// 再按第 1 间毫无反应）。要重新选，靠的是松开 RecruitData，不是丢列表。
+        /// </summary>
         private static void ReleaseStickyRoom(MusicSelectProcess instance)
         {
-            LinkRuntime.ConnectList = null;
             if (instance == null) return;
             try
             {
+                // 日志用的这次读取单独兜一层：它走 RecruitData 的 getter（会经过我们的
+                // PostRecruitData），在 OnStart 这种"音乐数据还没就绪"的时刻会抛 NRE ——
+                // 之前它把下面的"松开"整个带崩了（日志里 6 次"松开…出错"，每次 release 全废）。
+                try
+                {
+                    RecruitInfo before = instance.RecruitData;
+                    if (before != null)
+                        LinkLog.Info("松开上次选中的房间：" + LinkRuntime.Identity(before)
+                                     + "（IsConnectingMusic=" + instance.IsConnectingMusic + "）");
+                }
+                catch (Exception ex) { LinkLog.Debug("读当前选中的房间时出错：" + ex.Message); }
+
                 if (LinkRuntime.SetRecruitData != null)
                     LinkRuntime.SetRecruitData.Invoke(instance, new object[] { null });
                 instance.IsConnectingMusic = false;
+                LinkRuntime.LastRecruitId = null;
             }
             catch (Exception ex)
             {
@@ -453,6 +483,73 @@ namespace InStoreLink
         {
             IManager manager = LinkRuntime.PartyMan;
             if (manager == null) return;
+
+            // 诊断：把"按了没反应"要看的那几个状态一次性打出来（组合变一次才打一行，
+            // 免得像 1416 行/20 秒那样刷屏）。F=站在联机栏 C=IsConnectingMusic
+            // R=有 RecruitData；H=房主 L=客户端 Q=请求中 N=已连接。
+            try
+            {
+                string flags = (manager.IsHost() ? "H" : "-") + (manager.IsClient() ? "L" : "-")
+                             + (manager.IsRequest() ? "Q" : "-") + (manager.IsConnect() ? "N" : "-");
+                string sig = (__instance.IsConnectionFolder() ? "F" : "-")
+                           + (__instance.IsConnectingMusic ? "C" : "-")
+                           + (__instance.RecruitData != null ? "R" : "-")
+                           + " " + flags + " cur=" + __instance.CurrentMusicSelect
+                           + " rooms=" + (LinkRuntime.ConnectList == null ? -1 : LinkRuntime.ConnectList.Count)
+                           + " st=" + manager.GetCurrentStateID()
+                           + " joined=" + (LinkRuntime.JoinedRoomId ?? "-");
+                if (sig != LinkRuntime.LastStateSig)
+                {
+                    LinkRuntime.LastStateSig = sig;
+                    LinkLog.Info("选曲状态 " + sig);
+                }
+            }
+            catch (Exception) { /* 诊断而已，别让它影响正事 */ }
+
+            // ── 按 BACK 从房间里退回房间列表之后，还能选别的房间 ──────────────────
+            // 实测：进了第 2 间 → 按 BACK 回到房间列表（人已经出来了），再按第 1 间没反应。
+            // 原因是本体那边联机还挂着（IsConnect 还是 true），而 PartyExec 在
+            // IsHost/IsClient/IsRequest/IsConnect 时会**直接 return** —— 连"发起加入"
+            // 那一段都走不到，按谁都不发起。
+            // 这里补一步：已经连着一间、但玩家把光标挪到了**另一间** → 说明人已经从
+            // 上一间退出来了，用本体自己的 CancelBothRecruitJoin() 把上一次联机取消掉
+            // （本体 Client.CancelJoin 会把状态复位，之后 IsConnect 就是 false）。
+            try
+            {
+                bool connected = manager.IsConnect();
+                if (connected && !LinkRuntime.WasConnected)
+                {
+                    // 刚连上的那一帧，光标还停在这一间上 —— 这时记下来的就是"进的是哪一间"。
+                    LinkRuntime.JoinedRoomId = __instance.RecruitData == null
+                        ? null : LinkRuntime.Identity(__instance.RecruitData);
+                }
+                LinkRuntime.WasConnected = connected;
+
+                if (connected && !string.IsNullOrEmpty(LinkRuntime.JoinedRoomId) &&
+                    !manager.IsHost() && __instance.IsConnectionFolder() &&
+                    LinkRuntime.ConnectList != null)
+                {
+                    int cur = __instance.CurrentMusicSelect;
+                    if (cur >= 0 && cur < LinkRuntime.ConnectList.Count &&
+                        LinkRuntime.ConnectList[cur] != null)
+                    {
+                        string target = LinkRuntime.Identity(LinkRuntime.ConnectList[cur]);
+                        if (target != LinkRuntime.JoinedRoomId)
+                        {
+                            LinkLog.Info("人已退出上一间（" + LinkRuntime.JoinedRoomId
+                                         + "），光标指到 " + target + "：取消上一次联机，重新允许选取");
+                            manager.CancelBothRecruitJoin();
+                            LinkRuntime.JoinedRoomId = null;
+                            LinkRuntime.WasConnected = false;
+                            ReleaseStickyRoom(__instance);
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                LinkLog.Debug("取消上一次联机时出错：" + ex.Message);
+            }
 
             // 诊断：这一栏（店内联机）里光标能不能挪到第 2 间？
             // 玩家反馈"怎么按都是第一间"，先分清是"光标挪不动"还是"我们读错了位置"。
@@ -512,8 +609,20 @@ namespace InStoreLink
             }
             // 人已经离开「店内マッチング」这一栏了 → 把上次选中的房间松开，
             // 免得下次进来还攥着上一间（玩家实测的"锁在第 2 间"）。
-            if (!__instance.IsConnectionFolder() && LinkRuntime.ConnectList != null)
+            // 判据不能用 ConnectList：它现在**不再被清空**（清了会导致退出后按了没反应），
+            // 要看"此刻手里到底还攥着没有" —— IsConnectingMusic 真、或者我们自己写过
+            // 房间数据（LastRecruitId）才需要松开。
+            // ★ 这里别去读 RecruitData 的 getter：它在我们自己的 PostRecruitData 里会走
+            //   IsConnectionFolder()/GetRecruitListWithoutMe()，OnStart 前后可能抛 NRE，
+            //   一抛就是整个 PartyExec 后置补丁炸掉（每帧一次）。
+            // ★ 必须**边沿触发**（在栏里 → 离开栏）：只看"当前不在栏里"的话，
+            //   在外面浏览普通分类时（PreIsConnectStart 也会把 RecruitData 对准某个房间，
+            //   和本体一致）就会"对准一次 / 松开一次"每帧来回抖。
+            bool inConnectionFolder = __instance.IsConnectionFolder();
+            if (LinkRuntime.WasInConnectionFolder && !inConnectionFolder &&
+                (__instance.IsConnectingMusic || LinkRuntime.LastRecruitId != null))
                 ReleaseStickyRoom(__instance);
+            LinkRuntime.WasInConnectionFolder = inConnectionFolder;
         }
 
         [HarmonyPostfix]
@@ -553,22 +662,34 @@ namespace InStoreLink
             // 本体原本靠"对方的 IP 是不是本机"来判断，这里直接按"有没有房间"来判断。
             // 注意：判断依据必须是**游戏现在真的有哪些房间**（recruits），不能拿 ConnectList ——
             // 那是"上一次显示过的顺序"，可能是空的/过期的（踩过：房间明明喂进去了，分类栏却一直空着）。
-            if (!__instance.IsConnectingMusic && recruits.Count > 0)
+            if (recruits.Count > 0)
             {
                 // ★ 这里**不要**重建列表！ApplyConnectData 一重建，选曲光标就被弹回第 0 项
                 // （玩家实测：按第 2 间之后光标立刻跳回第 1 间），于是读到的永远是第 1 间 ——
                 // "怎么按都是第一间"就是这么来的（前后栽了两次）。
                 // 列表由游戏自己调 SetConnectData 时重建（我们那层补丁负责），这里只需要
                 // 按"玩家现在看到的顺序"（ConnectList）+ 当前光标取房间。
+                //
+                // ★ 也**不要**再拿 IsConnectingMusic 当闸门了：它的本体语义就是
+                // "RecruitData != null"（见本体 SetConnectData），拿它当闸门的话，
+                // 只要之前对准过一间（哪怕人已经从房间里退出来了），这里就永远不再更新
+                // RecruitData —— 而本体的 IsConnectStart 又被我们整个接管了，于是
+                // "进第 2 间 → 退出 → 选第 1 间"按了没反应。改回本体的做法：谁变对准谁
+                // （本体第二分支也是这么干的：IP 变了就重新对准），只是不重建列表。
                 List<RecruitInfo> shown = LinkRuntime.ConnectList;
-                if (shown == null || shown.Count == 0) shown = recruits;
+                if (shown == null || shown.Count == 0 || !AllRoomsIn(shown, recruits)) shown = recruits;
                 int index = __instance.CurrentMusicSelect;
                 if (index < 0 || index >= shown.Count) index = 0;
                 RecruitInfo recruit = shown[index];
+                if (recruit == null) return false;   // 列表里可能有 null（本体列表不保证），别往 Identity 里传
+                string id = LinkRuntime.Identity(recruit);
+                // 已经对准这一间就别每帧重设（以前每帧写一遍，20 秒刷了 1400 多行日志）
+                if (id == LinkRuntime.LastRecruitId) return false;
                 LinkLog.Info("选曲界面拿到房间数据（光标 " + index + "/" + (shown.Count - 1) + "）："
                              + JsonUtility.ToJson(recruit));
                 if (LinkRuntime.SetRecruitData != null)
                     LinkRuntime.SetRecruitData.Invoke(__instance, new object[] { recruit });
+                LinkRuntime.LastRecruitId = id;
                 __result = true;
             }
             return false;
@@ -658,8 +779,11 @@ namespace InStoreLink
             // 记下"这次真正显示出来的是哪些房间、什么顺序"，供 RecruitData getter 按光标取
             LinkRuntime.ConnectList = shown;
 
-            // 一个房间都没有时也要放一格占位，否则那一栏是空的、光标没地方停
-            if (recruits == null || recruits.Count == 0)
+            // 一格都没翻译出来时也要放个占位，否则那一栏是空的、光标没地方停。
+            // 注意判据用 connectList.Count 而不是 recruits.Count：大厅里**有房间但全部都装不了**
+            // （歌没装 / 没谱面）时，recruits 非空、connectList 却是空的 —— 只看 recruits
+            // 就会漏掉这种情况，那一格直接变空白。
+            if (connectList.Count == 0)
             {
                 CombineMusicSelectData dummy = new CombineMusicSelectData();
                 dummy.musicSelectData = new List<MusicSelectData>();

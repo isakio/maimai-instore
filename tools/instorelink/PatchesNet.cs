@@ -87,7 +87,15 @@ namespace InStoreLink
                     ____buildVersionText.color = Color.yellow;
                     break;
                 case LinkClient.StatusConnected:
-                    int rooms = LinkRuntime.PartyMan == null ? 0 : LinkRuntime.PartyMan.GetRecruitList().Count;
+                    // GetRecruitList() 本体在"还没开局"时可能返回 null —— 直接取 .Count 会 NRE，
+                    // 而这个 postfix 一抛就是本体的 ViewUpdate 炸掉。
+                    int rooms = 0;
+                    IManager pm = LinkRuntime.PartyMan;
+                    if (pm != null)
+                    {
+                        System.Collections.Generic.List<RecruitInfo> all = pm.GetRecruitList();
+                        if (all != null) rooms = all.Count;
+                    }
                     if (LinkRuntime.OnlineUserCount > 0)
                     {
                         ____buildVersionText.text = "房间 " + rooms + " · 在线 " + LinkRuntime.OnlineUserCount;
@@ -126,6 +134,13 @@ namespace InStoreLink
             FinishRecruit finish = info as FinishRecruit;
             if (start != null || finish != null)
             {
+                // 这里一抛异常就是本体发招募那条路炸掉。客户端/配置理论上在 CheckAuth 时就绪了，
+                // 但"理论上"踩过太多次 —— 宁可这条招募报不出去，也不能把游戏带崩。
+                if (LinkRuntime.Client == null || LinkRuntime.Config == null)
+                {
+                    LinkLog.Error("招募上报失败：客户端 / 配置还没就绪，这条招募没报出去");
+                    return false;
+                }
                 RecruitInfo recruit = start != null ? start.RecruitInfo : finish.RecruitInfo;
                 string action = start != null ? "start" : "finish";
                 RecruitRecordOut record = new RecruitRecordOut();
@@ -164,7 +179,10 @@ namespace InStoreLink
         [HarmonyPatch(typeof(PartyLink.Util), "MyIpAddress", typeof(int))]
         public static bool PreMyIpAddress(int mockID, ref IPAddress __result)
         {
-            __result = LinkRuntime.Client.StubAddress;
+            // 客户端还没起时别用空引用 —— 交回本体拿真实本机地址（这时也还没进联机流程）
+            LinkClient client = LinkRuntime.Client;
+            if (client == null) return true;
+            __result = client.StubAddress;
             return false;
         }
 
@@ -204,14 +222,25 @@ namespace InStoreLink
             if (____state != 0x04) return;
             ____state = 0x08;
 
-            DeliveryChecker.get().start(true);
-            Setting.Data data = new Setting.Data();
-            data.set(false, 4);
-            Setting.get().setData(data);
-            Setting.get().setRetryEnable(true);
-            Advertise.get().initialize(DB.MachineGroupID.ON);
-            LinkRuntime.PartyMan.Start(DB.MachineGroupID.ON);
-            LinkLog.Msg("已跳过本体联网自检");
+            // 这几步里有好几个 get() 单例，本体在某些启动顺序下会返回 null。这里整段兜住：
+            // 抛出去的后果是启动流程直接崩（比"没跳过自检"严重得多）。
+            try
+            {
+                DeliveryChecker.get().start(true);
+                Setting.Data data = new Setting.Data();
+                data.set(false, 4);
+                Setting.get().setData(data);
+                Setting.get().setRetryEnable(true);
+                Advertise.get().initialize(DB.MachineGroupID.ON);
+                IManager party = LinkRuntime.PartyMan;
+                if (party != null) party.Start(DB.MachineGroupID.ON);
+                else LinkLog.Warn("跳过自检时拿不到 party 管理器（PartyMan 为 null），这一步先跳过");
+                LinkLog.Msg("已跳过本体联网自检");
+            }
+            catch (Exception ex)
+            {
+                LinkLog.Error("跳过本体联网自检时出错（已忽略，游戏会走原生流程）：" + ex.Message);
+            }
         }
 
         // ------------------------------------------------------------ 包加解密（直接放行明文）

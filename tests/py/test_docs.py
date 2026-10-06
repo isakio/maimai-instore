@@ -133,6 +133,10 @@ def main():
         ("README.md", "%d 行" % total_patches),
         ("docs/给朋友看-安装步骤.md", "%d 行" % total_patches),
         ("docs/双人联机配置清单.md", "%d 行" % total_patches),
+        # 安装脚本最后打印的"应该看到哪几行"也算验收依据，别只改 md 忘了它
+        # （踩过：补丁从 33 加到 34，install.ps1 里还写着 33，照着脚本核对的人会以为少挂了一条）
+        ("client/install.ps1", "%d 行" % total_patches),
+        ("client/install.ps1", "共 %d 条生效" % total_patches),
     ]
     bad = []
     for rel, needle in wants:

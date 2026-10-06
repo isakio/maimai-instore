@@ -58,6 +58,32 @@ namespace InStoreLink
         public static int OnlineUserCount;
         public static int MusicIdSum;
         public static bool SideMessageFlag;
+        /// <summary>
+        /// 上一次真正写进 MusicSelectProcess.RecruitData 的房间（Identity 字符串）。
+        /// 用来避免"光标没动也每帧重设一遍"，也让 IsConnectStart 能在**换房间**时
+        /// 重新对准（见 PreIsConnectStart）。
+        /// </summary>
+        public static string LastRecruitId;
+        /// <summary>诊断用：上一次打印的选曲状态组合，只在组合变化时打一行。</summary>
+        public static string LastStateSig;
+        /// <summary>
+        /// 上一次见到的"已经进了某间房"（IManager.IsConnect()）；用来在刚连上的那一帧
+        /// 记下进的是哪一间（JoinedRoomId）。
+        /// </summary>
+        public static bool WasConnected;
+        /// <summary>
+        /// 当前真正连着的房间（Identity）。人按 BACK 回到房间列表、光标挪到另一间之后，
+        /// 靠它跟光标所在的房间比，判断"人已经退出上一间了"。
+        /// </summary>
+        public static string JoinedRoomId;
+        /// <summary>
+        /// 上一帧人是不是站在「店内マッチング」那一栏里。松开"上次选中的房间"必须
+        /// **边沿触发**（在栏里 → 离开栏），不能只看"当前不在栏里"：外面浏览普通
+        /// 分类时 PreIsConnectStart 也会顺手把 RecruitData 对准某个房间（本体也是
+        /// 这么干的），只看当前状态就会"设一次、松一次"每帧来回抖，
+        /// 旧版还会顺带把 ConnectList 一起清掉 —— 那正是"进第 2 间→退出→按了没反应"。
+        /// </summary>
+        public static bool WasInConnectionFolder;
         /// <summary>诊断用：上一次看到的选曲光标位置（看这一栏能不能把光标挪到第 2 间）。</summary>
         public static int LastCursor = -1;
 
