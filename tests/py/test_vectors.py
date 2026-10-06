@@ -125,8 +125,14 @@ else:
                 else:
                     parsed_bad += 1
                     print("    ! %s -> %s" % (cmd, got))
-    check(parsed_ok > 0 and parsed_bad == 0,
-          "日志里 %d 种报文全部能被模型还原（%d 种）" % (parsed_ok, parsed_ok + parsed_bad))
+    if parsed_ok + parsed_bad == 0:
+        # 目录里只有"注册 / 心跳"这类没有 Src 的消息（比如那局没进过房）—— 没有可反验的
+        # 流报文是**正常情况**，不能判失败（以前这里会红，按文档给出 MAIMAI_LOGS 的人
+        # 会看到一个查不出原因的假失败）。
+        print("  · 这批日志里没有带 Src 的流报文（只有注册/心跳之类），这段跳过")
+    else:
+        check(parsed_ok > 0 and parsed_bad == 0,
+              "日志里 %d 种报文全部能被模型还原（%d 种）" % (parsed_ok, parsed_ok + parsed_bad))
 
 print()
 if FAIL:

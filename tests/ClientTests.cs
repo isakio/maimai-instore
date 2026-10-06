@@ -92,6 +92,8 @@ public static class ClientTests
         TestCloseDropsQueuedAccept();
         TestStreamKeysUnique();
         TestBindQueuesReleasedOnClose();
+        TestBadBase64IsDropped();
+        TestStrayOpsAfterClose();
 
         Console.WriteLine();
         Console.WriteLine("通过 " + _pass + " 项，失败 " + _fail + " 项");
@@ -235,6 +237,67 @@ public static class ClientTests
         Check(c.AcceptQ.ContainsKey(60012), "Bind 之后 AcceptQ 里有这个端口");
         tcp.Close();
         Check(!c.AcceptQ.ContainsKey(60012), "Close 之后 AcceptQ 里的端口被摘掉");
+    }
+
+    /// <summary>
+    /// 对端发来的 data 段 base64 不合法时，Receive 必须**丢掉那条继续**，不能把
+    /// FormatException 抛到游戏主线程（同房的人就能让本机崩），也不能一直卡在同一条上。
+    /// </summary>
+    private static void TestBadBase64IsDropped()
+    {
+        Console.WriteLine("10) 坏 base64 包：丢掉它，后面的好包继续收");
+        LinkClient c = NewClient("W9CLIENT0008");
+        LinkClient.Instance = c;
+        LinkSocket s = new LinkSocket(System.Net.Sockets.AddressFamily.InterNetwork,
+            System.Net.Sockets.SocketType.Stream, System.Net.Sockets.ProtocolType.Tcp, 0);
+        SocketAsyncEventArgs args = new SocketAsyncEventArgs();
+        args.RemoteEndPoint = new System.Net.IPEndPoint(
+            new System.Net.IPAddress(new byte[] { 203, 0, 113, 9 }), 50100);
+        s.ConnectAsync(args, 0);
+        int key = s.StreamKey;
+        System.Collections.Concurrent.ConcurrentQueue<LinkMsg> q =
+            c.TcpRecvQ.Get(key);
+        q.Enqueue(new LinkMsg { Cmd = (int)LinkCmd.DataSend, Data = "!!!not-base64!!!" });
+        q.Enqueue(new LinkMsg { Cmd = (int)LinkCmd.DataSend, Data = "aGVsbG8=" });   // "hello"
+
+        byte[] buf = new byte[32];
+        SocketError err;
+        int n = 0;
+        bool threw = false;
+        try { n = s.Receive(buf, 0, buf.Length, SocketFlags.None, out err); }
+        catch (Exception) { threw = true; }
+        Check(!threw, "坏包不会抛异常出来");
+        Check(n == 5 && System.Text.Encoding.ASCII.GetString(buf, 0, 5) == "hello",
+              "坏包被丢掉、后面的好包正常收到（收到 " + n + " 字节）");
+    }
+
+    /// <summary>
+    /// Close 之后如果还有残留的 Send/Receive（正常生命周期不会，但游戏状态机出错时可能），
+    /// 影子 socket 自己不能抛异常 —— 这正是我们"Close 时摘掉映射但不关本体真 socket"
+    /// 那个取舍要保住的不变量。
+    /// </summary>
+    private static void TestStrayOpsAfterClose()
+    {
+        Console.WriteLine("11) Close 之后再 Receive/Send 不能抛异常");
+        LinkClient c = NewClient("W9CLIENT0009");
+        LinkClient.Instance = c;
+        LinkSocket s = new LinkSocket(System.Net.Sockets.AddressFamily.InterNetwork,
+            System.Net.Sockets.SocketType.Stream, System.Net.Sockets.ProtocolType.Tcp, 0);
+        SocketAsyncEventArgs args = new SocketAsyncEventArgs();
+        args.RemoteEndPoint = new System.Net.IPEndPoint(
+            new System.Net.IPAddress(new byte[] { 203, 0, 113, 9 }), 50100);
+        s.ConnectAsync(args, 0);
+        s.Close();
+        bool threw = false;
+        try
+        {
+            byte[] buf = new byte[8];
+            SocketError err;
+            s.Receive(buf, 0, buf.Length, SocketFlags.None, out err);
+            s.Send(buf, 0, 0, SocketFlags.None);
+        }
+        catch (Exception ex) { threw = true; Console.WriteLine("      " + ex.GetType().Name); }
+        Check(!threw, "Close 之后的收发不会抛异常出来");
     }
 
     private static void TestCloseDropsQueuedAccept()

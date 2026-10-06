@@ -276,22 +276,38 @@ namespace InStoreLink
 
         public int Receive(byte[] buffer, int offset, int size, SocketFlags flags, out SocketError errorCode)
         {
-            ConcurrentQueue<LinkMsg> q = _client.TcpRecvQ.Get(_streamId + _bindPort);
-            LinkMsg msg;
-            if (q == null || !q.TryDequeue(out msg) || string.IsNullOrEmpty(msg.Data))
+            // 一次可能要穿过几条坏包：data 段是**对端**给的文本，base64 不合法时
+            // Convert.FromBase64String 会抛 FormatException —— 那是在游戏主线程的接收
+            // 路径上抛，等于同房的任何一个人都能让本机崩。这里自己把坏包丢掉继续看下一条。
+            while (true)
             {
-                errorCode = SocketError.WouldBlock;
-                return 0;
+                ConcurrentQueue<LinkMsg> q = _client.TcpRecvQ.Get(_streamId + _bindPort);
+                LinkMsg msg;
+                if (q == null || !q.TryDequeue(out msg) || string.IsNullOrEmpty(msg.Data))
+                {
+                    errorCode = SocketError.WouldBlock;
+                    return 0;
+                }
+                byte[] data;
+                try
+                {
+                    data = Convert.FromBase64String(msg.Data);
+                }
+                catch (FormatException)
+                {
+                    LinkLog.Error("收到一条数据段的 base64 不合法，已丢弃（文本长度 "
+                                  + msg.Data.Length + "）");
+                    continue;      // 丢掉这条，接着看队列里的下一条（别原样返回，否则游戏会一直重试同一条）
+                }
+                // 尊重调用方给的 offset/size：以前是从 0 开始整段拷，既可能写错位置，
+                // 也可能越过 size 把缓冲区写坏。装不下就截断，并留一行日志。
+                int n = data.Length < size ? data.Length : size;
+                if (n < data.Length)
+                    LinkLog.Warn("收到 " + data.Length + " 字节，但缓冲区只剩 " + size + "，已截断");
+                Buffer.BlockCopy(data, 0, buffer, offset, n);
+                errorCode = SocketError.Success;
+                return n;
             }
-            byte[] data = Convert.FromBase64String(msg.Data);
-            // 尊重调用方给的 offset/size：以前是从 0 开始整段拷，既可能写错位置，
-            // 也可能越过 size 把缓冲区写坏。装不下就截断，并留一行日志。
-            int n = data.Length < size ? data.Length : size;
-            if (n < data.Length)
-                LinkLog.Warn("收到 " + data.Length + " 字节，但缓冲区只剩 " + size + "，已截断");
-            Buffer.BlockCopy(data, 0, buffer, offset, n);
-            errorCode = SocketError.Success;
-            return n;
         }
 
         public int ReceiveFrom(byte[] buffer, SocketFlags flags, ref EndPoint remoteEp)

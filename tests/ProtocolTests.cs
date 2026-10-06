@@ -157,6 +157,13 @@ public static class ProtocolTests
         CheckTrue(LinkConfig.TryParseRelay("isakio.cn", out host, out port) &&
                   host == "isakio.cn" && port == 20101, "RelayUrl = host（默认端口 20101）");
         CheckTrue(LinkConfig.TryParseRelay("", out host, out port) == false, "空 RelayUrl → false（走大厅 /info）");
+        // 端口越界必须判成"配置无效"（否则 Connect 抛参数错 → 每 3 秒重试刷日志）
+        CheckTrue(LinkConfig.TryParseRelay("isakio.cn:0", out host, out port) == false, "端口 0 → false");
+        CheckTrue(LinkConfig.TryParseRelay("isakio.cn:-1", out host, out port) == false, "端口 -1 → false");
+        CheckTrue(LinkConfig.TryParseRelay("isakio.cn:65536", out host, out port) == false, "端口 65536 → false");
+        CheckTrue(LinkConfig.TryParseRelay(":20101", out host, out port) == false, "只有端口没主机 → false");
+        CheckTrue(LinkConfig.TryParseRelay("isakio.cn:65535", out host, out port) && port == 65535,
+                  "端口 65535（边界内）仍然接受");
 
         string tmp = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "instorelink-cfg-test.toml");
         System.IO.File.WriteAllText(tmp,

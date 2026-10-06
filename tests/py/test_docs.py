@@ -239,6 +239,55 @@ def main():
                     bad.append("%s:%d 写着 %s 步，实际 %d" % (rel, no, m.group(1), steps))
     check(not bad, "文档里提到的 run_all 步数和实际一致", "\n      ".join(bad))
 
+    # ------------------------------------------------ 9. 各测试的"项数"对得上吗
+    # run_all.sh 会把每个测试实际打印的项数写进 build/test-counts.txt（同步记录，最可靠）。
+    # 这里拿它对照文档表格里的"（N 项）" —— 给测试加了用例却忘了改文档，这一步就会红。
+    # （这个坑踩过三次：补丁数 33→34、run_all 8 步→10 步、端到端 18→19 / 异常 19→25。）
+    print("9) 各测试的项数（文档表格 vs 实际跑出来的）")
+    counts_path = os.path.join(ROOT, "build", "test-counts.txt")
+    if not os.path.isfile(counts_path):
+        print("  · 跳过（没有 build/test-counts.txt —— 直接跑 test_docs 时正常）")
+    else:
+        actual = {}
+        for line in read(counts_path).splitlines():
+            parts = line.split()
+            if len(parts) == 2:
+                actual[parts[0]] = parts[1]
+        # key -> 文档表格里那一行包含的文件名
+        mapping = [
+            ("protocol", "ProtocolTests.cs"),
+            ("client", "ClientTests.cs"),
+            ("vectors", "test_vectors.py"),
+            ("e2e", "test_e2e.py"),
+            ("edge", "test_edge.py"),
+            ("probe", "GameCompatProbe.cs"),
+        ]
+        doc = read(os.path.join(ROOT, "docs", "客户端mod实现.md"))
+        bad = []
+        for key, fname in mapping:
+            if key not in actual:
+                continue
+            # 同一个文件名可能出现在多处（正文里提过一句、别的表格里也引过），
+            # 优先挑**带「（N 项）」**的那一行（也就是我们维护的那张测试表）。
+            cands = [l for l in doc.splitlines() if fname in l and "|" in l]
+            row = None
+            for line in cands:
+                if re.search(r"（(\d+)\s*项", line):
+                    row = line
+                    break
+            if row is None and cands:
+                row = cands[0]
+            if row is None:
+                bad.append("文档表格里找不到 %s 那一行" % fname)
+                continue
+            m = re.search(r"（(\d+)\s*项", row)
+            if m is None:
+                bad.append("%s 那一行没写（N 项）" % fname)
+                continue
+            if m.group(1) != actual[key]:
+                bad.append("%s：文档写 %s 项，实际跑出 %s 项" % (fname, m.group(1), actual[key]))
+        check(not bad, "文档里各测试的项数和实际一致", "\n      ".join(bad))
+
     print()
     if FAIL:
         print("失败 %d 项：" % len(FAIL))

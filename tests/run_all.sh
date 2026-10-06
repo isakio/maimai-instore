@@ -22,6 +22,30 @@ GAME="${1:-/mnt/d/game/maimai/SDEZ1.70/Package}"
 CSC="/mnt/c/Windows/Microsoft.NET/Framework64/v4.0.30319/csc.exe"
 FAILED=0
 
+# 每个测试**实际打印出来的项数**记到这里，最后一步（文档一致性）会拿它对照文档表格。
+# 为什么要这么做：文档表格里写着每个测试"（N 项）"，而给测试加了用例之后很容易忘了同步
+# —— 这个坑踩过好几次（补丁数 33→34、run_all 8 步→10 步都栽过）。
+# 直接截获测试自己的输出（同步，不经过 tee 那种异步中转），最可靠。
+mkdir -p "$ROOT/build"
+COUNTS="$ROOT/build/test-counts.txt"
+: > "$COUNTS"
+
+# 跑一个测试并把它的项数记下来：run_step <key> <命令...>
+run_step() {
+    local key="$1"; shift
+    local out rc n
+    out="$("$@" 2>&1)"; rc=$?
+    printf '%s\n' "$out"
+    n="$(printf '%s\n' "$out" \
+         | grep -aoE '（[0-9]+ 项）|通过 [0-9]+ 项' | tail -1 | grep -oE '[0-9]+')"
+    if [ -n "$n" ]; then
+        echo "$key $n" >> "$COUNTS"
+    else
+        echo "$key ?" >> "$COUNTS"          # 没抓到项数（比如测试直接崩了）
+    fi
+    return $rc
+}
+
 echo "########## 1. 编译 InStoreLink.dll"
 if [ -x "$CSC" ]; then
     bash "$ROOT/tools/build_wsl.sh" "$GAME" || { echo "编译失败，后面没法验证"; exit 1; }
@@ -43,7 +67,7 @@ if [ -x "$CSC" ]; then
         "$(to_win "$ROOT/tools/instorelink/LinkConfig.cs")" \
         "$(to_win "$ROOT/tests/ProtocolTests.cs")" 2>&1 | iconv -f GBK -t UTF-8 2>/dev/null
     chmod +x "$ROOT/build/ProtocolTests.exe"
-    "$ROOT/build/ProtocolTests.exe" || FAILED=1
+    run_step protocol "$ROOT/build/ProtocolTests.exe" || FAILED=1
 else
     echo "  · 跳过（没有 csc.exe）"
 fi
@@ -67,7 +91,7 @@ if [ -x "$CSC" ]; then
         "$(to_win "$ROOT/tests/ClientTests.cs")" 2>&1 | iconv -f GBK -t UTF-8 2>/dev/null
     if [ -f "$ROOT/build/ClientTests.exe" ]; then
         chmod +x "$ROOT/build/ClientTests.exe"
-        "$ROOT/build/ClientTests.exe" || FAILED=1
+        run_step client "$ROOT/build/ClientTests.exe" || FAILED=1
     else
         echo "客户端逻辑单测没编出来（见上面 csc 的输出）" >&2
         FAILED=1
@@ -79,20 +103,20 @@ fi
 echo
 echo "########## 4. Python 协议向量测试"
 # 有真实抓包日志的话（设 MAIMAI_LOGS 指向那个目录），这一段会额外验证日志里的报文
-MAIMAI_LOGS="${MAIMAI_LOGS:-}" python3 "$ROOT/tests/py/test_vectors.py" || FAILED=1
+run_step vectors env MAIMAI_LOGS="${MAIMAI_LOGS:-}" python3 "$ROOT/tests/py/test_vectors.py" || FAILED=1
 
 echo
 echo "########## 5. Python 端到端测试"
-python3 "$ROOT/tests/py/test_e2e.py" || FAILED=1
+run_step e2e python3 "$ROOT/tests/py/test_e2e.py" || FAILED=1
 
 echo
 echo "########## 6. Python 异常流程测试（房主先开打 / 目标不在线 / 反复重试 / 超时回收 / 限速）"
-python3 "$ROOT/tests/py/test_edge.py" || FAILED=1
+run_step edge python3 "$ROOT/tests/py/test_edge.py" || FAILED=1
 
 echo
 echo "########## 7. 游戏兼容性探针（补丁目标 / 注入字段）"
 if [ -d "$GAME/Sinmai_Data/Managed" ]; then
-    bash "$ROOT/tests/run_probe.sh" "$GAME" || FAILED=1
+    run_step probe bash "$ROOT/tests/run_probe.sh" "$GAME" || FAILED=1
 else
     echo "  · 跳过（找不到游戏目录 $GAME）"
 fi

@@ -115,6 +115,11 @@ PROTO_VERSION = 1
 # （挂住一个线程 + 吃内存），而这是个**未鉴权**的公开接口。
 MAX_BODY_BYTES = 64 * 1024
 MAX_STREAMS = 10            # 单个客户端同时挂起的建流上限
+# 单个客户端同时**已建成**的流上限。以前只限制了"挂起"（MAX_STREAMS），已建成的流表
+# 没有任何上限 —— 一个未鉴权连接只要不停地 CONNECT+ACCEPT（dst 指向自己也行），
+# 每两条小消息就在服务端多留一条永久记录，能一路涨到把内存吃干。
+# 正常一局联机同时也就 1~2 条流，64 已经非常宽松。
+MAX_ESTABLISHED_STREAMS = 64
 PENDING_TIMEOUT = 10        # 建流请求多久没人接就回收（秒，可用 --pending-timeout 改）
 MAX_ROOMS = 200             # 大厅同时存在的房间上限（可用 --max-rooms 改）
 ROOM_RATE_WINDOW = 10.0     # 开房限速窗口（秒）
@@ -144,6 +149,19 @@ def keychip_to_stub(keychip: str) -> int:
 
 def stub_to_ip(stub: int) -> str:
     return f"{stub >> 24}.{(stub >> 16) & 255}.{(stub >> 8) & 255}.{stub & 255}"
+
+
+def as_stub(value):
+    """把请求里的 IpAddress 收成整数；不是整数就返回 None（调用方回 400）。
+
+    为什么不能直接 `int(stub)`：这是**未鉴权**接口，`"IpAddress": "abc"` / `[]` / `{}`
+    都能让 int() 抛 ValueError/TypeError —— 处理函数里抛出去就是这条连接被掐断
+    （客户端看到 RemoteDisconnected）加日志里一条 traceback。bool 也要挡掉
+    （JSON 的 true 会被 int() 收成 1，那是"合法整数"但显然不是地址）。
+    """
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    return value
 
 
 def parse_msg(line: str) -> dict:
@@ -317,6 +335,7 @@ class RelayClient:
         self.pending: dict[int, dict] = {}
         self.last_heartbeat = time.time()
         self.connected_at = time.time()
+        self.unregistered = 0        # 收到多少条"还没注册就发过来的"消息（用来限流告警）
         self._lock = asyncio.Lock()
         self.closed = False
 
@@ -342,7 +361,11 @@ class RelayClient:
 
     async def register(self, keychip: str):
         if not keychip:
-            raise ValueError("注册消息没有 keychip")
+            # **不要抛异常**：这是"客户端发错了"，而且公开端口上随手就能触发 ——
+            # 抛出去会被 on_client 的兜底 LOG.exception 打成一条 ERROR + 完整 traceback，
+            # 谁都能拿来刷日志。这里返回 False，让调用方把这条连接关掉。
+            LOG.warning("注册消息没有 keychip（来源 %s），这条连接不予注册", self.peer_ip)
+            return False
         stub = keychip_to_stub(keychip)
         if STATE is None:
             raise RuntimeError("服务未初始化")
@@ -357,6 +380,7 @@ class RelayClient:
             STATE.stats["registered"] += 1
         STATE.log_event("注册", f"{keychip} 来自 {self.peer_ip} → 伪IP {stub_to_ip(stub)}")
         await self.send(ctl(CMD_START, data=f"version={PROTO_VERSION}"))
+        return True
 
     def find_target(self, msg: dict) -> "RelayClient | None":
         stub = None
@@ -460,6 +484,21 @@ class RelayClient:
                                               reason="这条挂起已经回收了"))
                 return
             target.pending.pop(sid, None)
+            # 已经建成的流也要有上限：两边谁的流表满了，这条就拒掉（回 CLOSE），
+            # 否则一张表能被刷到无限大（见 MAX_ESTABLISHED_STREAMS 的注释）。
+            if (len(target.streams) >= MAX_ESTABLISHED_STREAMS
+                    or len(self.streams) >= MAX_ESTABLISHED_STREAMS):
+                LOG.warning("建流数已达上限（%d），拒绝 sid=%s（%s ↔ %s）",
+                            MAX_ESTABLISHED_STREAMS, sid, self.keychip, target.keychip)
+                reason = "这个客户端的流数已达上限"
+                await self.send(close_msg(msg["proto"], sid,
+                                          target.stub, msg["dport"],
+                                          self.stub, msg["sport"], reason=reason))
+                if target is not self:
+                    await target.send(close_msg(msg["proto"], sid,
+                                                self.stub, msg["sport"],
+                                                target.stub, msg["dport"], reason=reason))
+                return
             target.streams[sid] = self.stub
             self.streams[sid] = target.stub
             await target.send(build_msg(CMD_TCP_ACCEPT, proto=msg["proto"], sid=sid,
@@ -582,9 +621,21 @@ async def relay_serve(host: str, port: int, heartbeat_timeout: int,
                     continue
                 try:
                     if msg["cmd"] == CMD_START:
-                        await client.register(msg["data"] or "")
+                        # 注册不成功（没 keychip）就把连接关掉：留着它只会让后面每条
+                        # 消息都打一句"未注册就发消息"的警告刷屏。
+                        if not await client.register(msg["data"] or ""):
+                            break
                     elif client.stub is None:
-                        LOG.warning("未注册就发消息，忽略: %s", line[:80])
+                        # 限流：以前是"每收到一条就打一条 warning"，一个从不注册的连接
+                        # （公开端口上随手可发）就能把日志刷爆、把真事件淹掉。
+                        # 前 3 条照打（方便排查），第 4 条直接断开这条连接。
+                        client.unregistered += 1
+                        if client.unregistered <= 3:
+                            LOG.warning("未注册就发消息，忽略: %s", line[:80])
+                        else:
+                            LOG.warning("这条连接发了 %d 条消息都没注册，断开（来源 %s）",
+                                        client.unregistered, peer[0])
+                            break
                     else:
                         await client.handle(msg)
                 except Exception as exc:
@@ -792,7 +843,14 @@ class LobbyHandler(BaseHTTPRequestHandler):
         tok = (parse_qs(urlparse(self.path).query).get("token") or [""])[0]
         if not tok:
             tok = self.headers.get("X-Admin-Token", "")
-        return hmac.compare_digest(tok, ADMIN_TOKEN)
+        # ★ 必须用 **bytes** 比：hmac.compare_digest 对**非 ASCII 的 str** 会抛
+        #   TypeError("comparing strings with non-ASCII characters is not supported")。
+        #   token 是从 URL 查询串来的 —— 谁都能塞个 emoji 进来，一抛就是这条请求
+        #   直接断连（客户端看到 RemoteDisconnected）+ 日志里一条 traceback。
+        try:
+            return hmac.compare_digest(tok.encode("utf-8"), ADMIN_TOKEN.encode("utf-8"))
+        except Exception:
+            return False
 
     def _relay_host(self) -> str:
         if HOST_OVERRIDE:
@@ -804,11 +862,10 @@ class LobbyHandler(BaseHTTPRequestHandler):
     def _recruit_start(self, data: dict):
         info = (data or {}).get("RecruitInfo") or {}
         mecha = info.get("MechaInfo") or {}
-        stub = mecha.get("IpAddress")
+        stub = as_stub(mecha.get("IpAddress"))
         if stub is None:
-            self._json(400, {"error": "RecruitInfo.MechaInfo.IpAddress 缺失"})
+            self._json(400, {"error": "RecruitInfo.MechaInfo.IpAddress 缺失或不是整数"})
             return
-        stub = int(stub)
 
         keychip = (data or {}).get("Keychip")
         if not keychip:
@@ -858,11 +915,10 @@ class LobbyHandler(BaseHTTPRequestHandler):
     def _recruit_finish(self, data: dict):
         info = (data or {}).get("RecruitInfo") or {}
         mecha = info.get("MechaInfo") or {}
-        stub = mecha.get("IpAddress")
+        stub = as_stub(mecha.get("IpAddress"))
         if stub is None:
-            self._json(400, {"error": "缺少 IpAddress"})
+            self._json(400, {"error": "缺少 IpAddress（或它不是整数）"})
             return
-        stub = int(stub)
         with STATE.lock:
             rec = STATE.recruits.get(stub)
             if rec is None:

@@ -224,6 +224,8 @@ v0.3 补上这几条（服务端 `instorematchd`，客户端配合）：
 | 接流方 Accept 了一条已经超时回收的流 | 回 `CTL_TCP_CLOSE` 给接流方，别让它攥着假流 | — |
 | 一方 `CTL_TCP_CLOSE` | 除了清两边流表，**再转发给对端** | 对面那条流也会被清掉 |
 | 挂起流数量超过 `MAX_STREAMS`(10) | 只拒这一条新流（v0.1 是**把整个连接踢掉**） | 这次加入失败，但人还在线 |
+| 已建成的流数量超过 `MAX_ESTABLISHED_STREAMS`(64) | 只拒这一条新的建流（回 `CTL_TCP_CLOSE` 给两边） | 防止"自连刷流表"把服务端内存吃干 |
+| 一条连接一直不注册、只是狂发消息 | 前 3 条打警告，第 4 条直接断开 | 公开端口上刷不出满屏 warning |
 | 房主已经不在中继上，但房间还挂在大厅 | 这个房间**不会出现在列表里**（`prune_recruits` 里顺手撤掉） | 列表里没有"点不进去的房间"这种东西 |
 
 每一条 `CTL_TCP_CLOSE` 的 **`data` 字段里都写了原因**（`目标不在线` / `服务端挂起已满，稍后再试` /
@@ -394,13 +396,13 @@ bash tests/run_all.sh        # 十步全跑，一分钟左右
 | 测试 | 覆盖什么 | 现在的结果 |
 | --- | --- | --- |
 | 编译 | 源码 ↔ 游戏本体 API 是否对得上 | ✅ 通过（`build/InStoreLink.dll`） |
-| `tests/ProtocolTests.cs` | 序列化/解析往返、伪 IP、配置解析（36 项） | ✅ 全绿 |
-| `tests/ClientTests.cs` | **客户端逻辑**（脱离游戏跑）：建流挂起 / 接流成功、超时、CLOSE 取消、失败按流绑定（防串号）、失败条子的保质期、待 Accept 队列清理、连开 200 条流 key 不重复、监听 socket 关闭时端口队列一起清（25 项） | ✅ 全绿 |
-| `tests/py/test_vectors.py` | 同一批向量 + **用真实抓包日志反验**（17 项；给出 `MAIMAI_LOGS` 时 18 项） | ✅ 全绿（12 种真实报文全部能还原） |
+| `tests/ProtocolTests.cs` | 序列化/解析往返、伪 IP、配置解析（41 项） | ✅ 全绿 |
+| `tests/ClientTests.cs` | **客户端逻辑**（脱离游戏跑）：建流挂起 / 接流成功、超时、CLOSE 取消、失败按流绑定（防串号）、失败条子的保质期、待 Accept 队列清理、连开 200 条流 key 不重复、监听 socket 关闭时端口队列一起清、坏 base64 包丢掉不崩、Close 后收发不抛异常（28 项） | ✅ 全绿 |
+| `tests/py/test_vectors.py` | 同一批向量 + **用真实抓包日志反验**（17 项；日志目录里真有流报文时多 1 项：18 项） | ✅ 全绿（12 种真实报文全部能还原） |
 | `tests/py/test_e2e.py` | 起真的 instorematchd，跑完 开房→列表→建流→传数据→大包→关流→关房（19 项） | ✅ 全绿 |
-| `tests/py/test_edge.py` | **异常流程**：房主先开打 / 目标不在线 / 反复重试 / 挂起超时回收 / 身份校验 / 幽灵房不公开 / 限速与房间上限，外加每次拒绝都带原因、畸形请求体不能掐断连接（25 项） | ✅ 全绿 |
+| `tests/py/test_edge.py` | **异常流程**：房主先开打 / 目标不在线 / 反复重试 / 挂起超时回收 / 身份校验 / 幽灵房不公开 / 限速与房间上限，外加每次拒绝都带原因、畸形请求体不能掐断连接、不带 keychip 的注册只警告不抛 traceback、非 ASCII token 不断连、已建成流数有上限、IpAddress 非整数不打崩请求、不注册刷消息会限流断开（48 项） | ✅ 全绿 |
 | `tests/py/live_smoke.py` | **线上烟测**（不放进 `run_all.sh`，会往公开大厅临时开房）：对着真在跑的大厅把上面那些场景再走一遍，外加"第二个房客""房主中途掉线""房间 TTL vs 续报""幽灵房不公开""10 个房间选哪间进哪间"（25 项） | ✅ 全绿（打的就是 `isakio.cn`） |
-| `tests/GameCompatProbe.cs` | **游戏兼容性探针**：补丁目标方法是否存在、注入字段类型是否匹配、反射句柄拿不拿得到，外加 InStoreMatch 按字符串反射的那些名字（`SelectorTab._tabDatas` / `GenreSelectController.SortType2Genre` / `GameManager.<IsFreedomMode>k__BackingField` …）一起守着（81 项） | ✅ 全绿 |
+| `tests/GameCompatProbe.cs` | **游戏兼容性探针**：补丁目标方法是否存在、注入字段类型是否匹配、反射句柄拿不拿得到，外加 InStoreMatch 按字符串反射的那些名字（`SelectorTab._tabDatas` / `GenreSelectController.SortType2Genre` / `GameManager.<IsFreedomMode>k__BackingField`、`MonitorBase.isPlayerActive` …）一起守着（82 项） | ✅ 全绿 |
 | `tools/check_patch_params.cs` | **参数名检查**：两个 dll 的补丁（InStoreLink 34 条 + InStoreMatch 8 个补丁方法）的普通参数名逐个和游戏对齐，外加 Prefix/Postfix 标注、`___字段` 是否存在（Harmony 是按名字传参的） | ✅ 全绿 |
 | `tools/fingerprint.cs` | **发行版指纹**：`client/` 里那两个 dll 是不是真的由当前源码编出来的（csc 输出不可复现，md5 比不出来） | ✅ 全绿 |
 | `tests/py/test_docs.py` | **文档一致性**：发行 dll 的字节数 / md5、Markdown 相对链接、补丁条数、旧名字残留、`third_party/` 里有没有二进制 | ✅ 全绿 |

@@ -77,6 +77,11 @@ namespace InStoreLink
                 {
                     int parsed;
                     if (!int.TryParse(p, NumberStyles.Integer, CultureInfo.InvariantCulture, out parsed)) return false;
+                    // 端口必须落在 1..65535：'host:0' / 'host:-1' / 'host:99999' 以前都当合法，
+                    // 结果是 Client.Port 拿到非法值 → Connect 抛参数错 → 每 3 秒重试一次、
+                    // 日志里只有 "连不上中继"，看不出是配置写错了。这里判成"配置无效"，
+                    // 调用方就会回退去大厅 /info 拿中继地址（那才是原来的降级路径）。
+                    if (parsed < 1 || parsed > 65535) return false;
                     port = parsed;
                 }
                 s = s.Substring(0, colon);

@@ -28,7 +28,7 @@ import urllib.request
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from linkproto import (MockClient, Msg, stub_u32,
-                       CTL_TCP_CONNECT, CTL_TCP_CLOSE, CTL_HEARTBEAT, PROTO_TCP)
+                       CTL_TCP_CONNECT, CTL_TCP_ACCEPT, CTL_TCP_CLOSE, CTL_HEARTBEAT, PROTO_TCP)
 
 SERVER = os.environ.get("IMD_SERVER_PY", os.path.normpath(os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "..", "..", "instorematchd", "instorematchd.py")))
@@ -85,14 +85,18 @@ def recruit_body(keychip, stub, music_id=12054, name="测试房主"):
 class Server:
     """起一个临时 instorematchd，并确认**这个进程**真的起来了。"""
 
-    def __init__(self, pending_timeout=10, max_rooms=200):
+    def __init__(self, pending_timeout=10, max_rooms=200, admin_token=None):
         self.log = tempfile.NamedTemporaryFile("w+", suffix=".log", delete=False)
+        self.proc = None
+        argv = [sys.executable, "-B", SERVER, "--bind", HOST,
+                "--lobby-port", str(LOBBY), "--relay-port", str(RELAY),
+                "--recruit-ttl", "30", "--heartbeat-timeout", "30",
+                "--pending-timeout", str(pending_timeout),
+                "--max-rooms", str(max_rooms), "--log-level", "INFO"]
+        if admin_token:
+            argv += ["--admin-token", admin_token]
         self.proc = subprocess.Popen(
-            [sys.executable, "-B", SERVER, "--bind", HOST,
-             "--lobby-port", str(LOBBY), "--relay-port", str(RELAY),
-             "--recruit-ttl", "30", "--heartbeat-timeout", "30",
-             "--pending-timeout", str(pending_timeout),
-             "--max-rooms", str(max_rooms), "--log-level", "INFO"],
+            argv,
             stdout=self.log, stderr=subprocess.STDOUT)
         # 不能只看 wait_port：上一轮的实例还占着端口时它会假报成功，
         # 于是测试其实连到了旧服务端上（踩过，会得出完全相反的结论）。
@@ -211,6 +215,39 @@ def case_bad_keychip():
     code, _ = http("POST", "/recruit/finish", recruit_body(hk, stub_u32(hk)))
     check(code == 200, "本人关房成功（%s）" % code)
 
+    # 中继上"不带 keychip 的注册"：以前 register() 抛 ValueError，被上层 LOG.exception
+    # 打成一条完整 traceback + ERROR（公开端口随手可触发），而且这条连接还留着 ——
+    # 之后每条消息再刷一句"未注册就发消息"的警告。现在应该是"警告 + 关连接"。
+    raw = socket.create_connection((HOST, RELAY), timeout=5)
+    raw.settimeout(5)
+    raw.sendall(b"1,1\n")                      # 只有 cmd=1，没有 keychip
+    time.sleep(0.3)
+    got = b"?"
+    try:
+        got = raw.recv(64)
+    except Exception:
+        pass
+    raw.close()
+    check(got == b"", "不带 keychip 的注册 → 服务端直接关掉这条连接（收到 %r）" % got)
+
+    # 一直不注册、只是狂发消息：以前每条都打一句 warning（公开端口能把日志刷爆），
+    # 现在限流成最多 3 条 + 断开这条连接。
+    raw = socket.create_connection((HOST, RELAY), timeout=5)
+    raw.settimeout(5)
+    try:
+        for _ in range(50):
+            raw.sendall(b"1,3\n")
+    except Exception:
+        pass
+    time.sleep(0.5)
+    got = b"?"
+    try:
+        got = raw.recv(64)
+    except Exception:
+        pass
+    raw.close()
+    check(got == b"", "不注册狂发消息 → 限流后断开（收到 %r）" % got)
+
 
 def case_malformed_body():
     print("5) 畸形请求体：非 JSON 对象不能把连接掐断")
@@ -233,6 +270,20 @@ def case_malformed_body():
 
     code, _ = http("POST", "/recruit/finish", recruit_body(kc, stub))
     check(code == 200, "畸形请求之后服务端照常工作（HTTP %s）" % code)
+
+    # IpAddress 不是整数时，以前 int(stub) 会抛 ValueError/TypeError —— 同一个坑：
+    # 处理函数里抛出去 = 这条连接被掐断 + 日志里一条 traceback。
+    for name, ip in (("字符串", "abc"), ("列表", [1]), ("字典", {"a": 1}),
+                     ("null", None), ("true", True)):
+        b = recruit_body("W9EDGEBODY02", 1)
+        b["RecruitInfo"]["MechaInfo"]["IpAddress"] = ip
+        for path in ("/recruit/start", "/recruit/finish"):
+            try:
+                code, _ = http("POST", path, b)
+            except Exception as exc:
+                code = "断连(%s)" % type(exc).__name__
+            check(code in (400, 404),
+                  "IpAddress=%s 走 %s 回 4xx 而不是断连（%s）" % (name, path, code))
 
 
 def case_pending_timeout():
@@ -317,6 +368,59 @@ def case_limits():
         srv.stop()
 
 
+def case_stream_cap():
+    print("10) 已建成的流也有上限（防自连刷爆服务端流表）")
+    srv = Server(pending_timeout=10)
+    try:
+        kc = "W9EDGECAP001"
+        st = stub_u32(kc)
+        c = MockClient(kc, HOST, RELAY)
+        c.recv()
+        try:
+            for i in range(120):
+                c.send(Msg(CTL_TCP_CONNECT, proto=PROTO_TCP, sid=7000 + i,
+                           src=st, sport=64000 + i, dst=st, dport=50100))
+                c.send(Msg(CTL_TCP_ACCEPT, proto=PROTO_TCP, sid=7000 + i,
+                           src=st, sport=50100, dst=st, dport=64000 + i))
+            time.sleep(0.8)
+            n = sum(cl["streams"] for cl in
+                    json.loads(urllib.request.urlopen(
+                        "http://%s:%d/api/status" % (HOST, LOBBY), timeout=5).read()
+                    )["clients"])
+            check(n <= 64, "自连 120 次后服务端流数被压在上限内（实际 %d）" % n)
+            check(n >= 1, "上限没有把正常建流也一起堵死（实际 %d）" % n)
+        finally:
+            c.close()
+        check("Traceback" not in srv.log_text(), "刷流表过程中没有 traceback")
+    finally:
+        srv.stop()
+
+
+def case_admin_token():
+    print("9) 管理员 token：非 ASCII 的 token 不能让请求断连")
+    srv = Server(admin_token="edge-secret")
+    try:
+        # hmac.compare_digest 对非 ASCII 的 **str** 会抛 TypeError —— 以前 token 直接拿去比，
+        # 一个 emoji 就让请求断连（客户端看到 RemoteDisconnected）+ 日志里一条 traceback。
+        for label, tok in (("中文", "%E6%97%A5%E6%9C%AC%E8%AA%9E"),
+                           ("emoji", "%F0%9F%98%80")):
+            try:
+                code, _ = http("GET", "/api/status?token=" + tok)
+            except Exception as exc:
+                code = "断连(%s)" % type(exc).__name__
+            check(code == 200, "%s token 走脱敏视图、不断连（HTTP %s）" % (label, code))
+            try:
+                code, _ = http("GET", "/admin?token=" + tok)
+            except Exception as exc:
+                code = "断连(%s)" % type(exc).__name__
+            check(code == 403, "%s token 进 /admin 回 403（HTTP %s）" % (label, code))
+        code, _ = http("GET", "/admin?token=edge-secret")
+        check(code == 200, "正确 token 仍然能进 /admin（HTTP %s）" % code)
+        check("Traceback" not in srv.log_text(), "带 token 的服务端日志里也没有 traceback")
+    finally:
+        srv.stop()
+
+
 def main():
     if not os.path.exists(SERVER):
         print("找不到服务端脚本：%s（用 IMD_SERVER_PY 指定）" % SERVER)
@@ -335,12 +439,20 @@ def main():
     finally:
         srv.stop()
 
+    # 客户端能发出来的畸形消息，不该在服务端打出一堆未捕获异常的 traceback
+    check("Traceback" not in srv.log_text(), "服务端日志里没有未捕获异常的 traceback")
+    check(srv.log_text().count("未注册就发消息") <= 3,
+          "不注册刷消息不会把日志刷爆（最多 3 条告警，实际 %d）"
+          % srv.log_text().count("未注册就发消息"))
+
     print("  服务端日志摘录：")
     for line in srv.log_text().splitlines():
         if any(k in line for k in ("回收", "取消挂起", "拒绝新流", "目标不在线", "开房被")):
             print("    " + line)
 
     case_limits()
+    case_admin_token()
+    case_stream_cap()
 
     print()
     if FAIL:

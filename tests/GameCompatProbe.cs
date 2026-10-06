@@ -225,6 +225,8 @@ public static class GameCompatProbe
         Field(mainPanel, "_subTitleText", "TextMeshProUGUI");
         Field(musicMonitor, "_genreTabController", "TabController（标签栏控制器）");
         FieldAny(genreData, "categoryID", "int（认哪一格是 198）");
+        // isPlayerActive 是 MonitorBase 上的私有实例字段（InStoreMatch 沿基类链找它）
+        FieldAny(T(game, "MonitorBase"), "isPlayerActive", "bool（只重建在用的监视器）");
         FieldStatic(gameManager, "<IsFreedomMode>k__BackingField",
                     "bool（面板右键临时借用 freedom 分支）");
         Report(T(game, "TabDataBase") != null, "类型 TabDataBase（_tabDatas 的元素类型）");
