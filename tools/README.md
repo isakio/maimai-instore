@@ -125,7 +125,7 @@ pkill -f fake_player.py
 | --- | --- |
 | `LinkProtocol.cs` | 线协议编解码（17 字段）、命令号、伪 IP 算法。**不依赖 Unity/游戏，能单独抽出来单测** |
 | `LinkConfig.cs` | 读 `InStoreLink.toml`（也认老的 `WorldLink.toml`），30 行的极简 TOML |
-| `LinkClient.cs` | 中继 TCP 连接：注册、心跳、收发线程、四个队列、重连、延迟统计 |
+| `LinkClient.cs` | 中继 TCP 连接：注册、心跳、收发线程、四个队列、重连、延迟统计（发送队列有上限，超限断开重连） |
 | `LinkSocket.cs` | 影子 socket：把游戏 `NFSocket` 的每个调用转成中继消息 |
 | `LinkLobby.cs` | 大厅 HTTP（`/info` `/online` `/recruit/list` `/recruit/start|finish`） |
 | `LinkRuntime.cs` | 全局状态：配置、连接、招募列表轮询、"新房间排队等主线程" |

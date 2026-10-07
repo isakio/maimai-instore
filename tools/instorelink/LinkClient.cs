@@ -65,6 +65,15 @@ namespace InStoreLink
         public string Host;
         public int Port;
 
+        /// <summary>
+        /// SendQ 的深度上限。超过它说明这条 TCP 连接已经堵死（对端一直不读、或者内核
+        /// 发送缓冲早满了），再往队列里塞只会无限涨内存。到上限就**判定对端已不可用、
+        /// 断开这条连接重连**，而不是继续丢包 —— 丢包会让上层协议错位（本体的包是带
+        /// 序列/确认的），比断开更糟。正常联机时队列深度是 0～个位数，这条永远碰不到。
+        /// 写成可写字段是为了让 tests/ClientTests.cs 能把它调小，不用真堆 4096 条。
+        /// </summary>
+        public static int SendQueueMaxDepth = 4096;
+
         public readonly ConcurrentQueue<LinkMsg> SendQ = new ConcurrentQueue<LinkMsg>();
         public readonly ConcurrentDictionary<int, ConcurrentQueue<LinkMsg>> TcpRecvQ =
             new ConcurrentDictionary<int, ConcurrentQueue<LinkMsg>>();
@@ -83,6 +92,8 @@ namespace InStoreLink
         private Thread _recvThread;
         private volatile bool _stopping;
         private int _reconnecting;               // 0/1，避免重入
+        private int _sendOverflow;               // 0/1：本次连接是否已因发送队列积压断开过
+        private long _sendDropped;               // 因积压被丢掉的报文数（诊断用）
 
         private readonly Stopwatch _heartbeat = Stopwatch.StartNew();
         private readonly long[] _delayWindow = new long[DelayWindowSize];
@@ -189,6 +200,18 @@ namespace InStoreLink
             get { return _stopping; }
         }
 
+        /// <summary>因为发送队列积压被丢掉的报文数（正常联机恒为 0）。</summary>
+        public long SendDropped
+        {
+            get { return Interlocked.Read(ref _sendDropped); }
+        }
+
+        /// <summary>本次连接是否已经因为发送队列积压判定过"对端不可用"。</summary>
+        public bool SendOverflowed
+        {
+            get { return Volatile.Read(ref _sendOverflow) != 0; }
+        }
+
         public void ConnectAsync()
         {
             Thread t = new Thread(ConnectLoop);
@@ -247,6 +270,7 @@ namespace InStoreLink
                 Stream stream = _tcp.GetStream();
                 _writer = new StreamWriter(stream, new UTF8Encoding(false)) { AutoFlush = true };
                 _reader = new StreamReader(stream, new UTF8Encoding(false));
+                Interlocked.Exchange(ref _sendOverflow, 0);   // 新连接，允许再次判定积压
                 StatusCode = StatusConnected;
 
                 Send(new LinkMsg { Cmd = (int)LinkCmd.CtlStart, Data = Keychip });
@@ -271,19 +295,27 @@ namespace InStoreLink
 
         private void SendLoop()
         {
+            // 记下"我是哪条连接的发送线程"。Reconnect 会换一茬收发线程，本线程若发现
+            // _sendThread 已经不是自己，就说明这条连接作废了，必须立刻退休 —— 否则它会
+            // 继续抽干队列去喂一条已经关掉的连接（把新连接的报文也一起吃掉）。
+            Thread me = Thread.CurrentThread;
             try
             {
                 while (!_stopping)
                 {
                     Thread.Sleep(SendTickMs);
-                    if (_stopping) return;
+                    if (_stopping || !ReferenceEquals(_sendThread, me)) return;
                     if (_heartbeat.ElapsedMilliseconds > HeartbeatMs)
                     {
                         _heartbeat.Restart();
                         Send(new LinkMsg { Cmd = (int)LinkCmd.CtlHeartbeat });
+                        // Send 可能刚因积压把连接断开（_sendThread 被清空），那就退休。
+                        if (!ReferenceEquals(_sendThread, me)) return;
                     }
                     LinkMsg msg;
-                    while (SendQ.TryDequeue(out msg)) WriteLine(msg);
+                    while (!_stopping && ReferenceEquals(_sendThread, me)
+                           && SendQ.TryDequeue(out msg))
+                        WriteLine(msg);
                 }
             }
             catch (ThreadAbortException) { }
@@ -547,13 +579,29 @@ namespace InStoreLink
             foreach (LinkMsg item in keep) q.Enqueue(item);
         }
 
-        /// <summary>入队一条消息；如果目标是本机伪 IP，就地处理（相当于自己连自己）。</summary>
+        /// <summary>
+        /// 入队一条消息；如果目标是本机伪 IP，就地处理（相当于自己连自己）。
+        /// 队列积压到上限时不再入队，而是判定对端已不可用、断开重连（见 SendQueueMaxDepth）。
+        /// </summary>
         public void Send(LinkMsg msg)
         {
             if (msg.Dst.HasValue && msg.Dst.Value == StubIp)
             {
                 LinkLog.Debug("本机回环 " + msg.Readable());
                 HandleIncoming(msg);
+                return;
+            }
+            if (SendQ.Count >= SendQueueMaxDepth)
+            {
+                Interlocked.Increment(ref _sendDropped);
+                // 只判一次：这条连接一旦积压断开，后面每个包都重连一次会把日志刷爆，
+                // 也没意义（连接已经在重连路上了）。新连接建立后会复位这个标记。
+                if (Interlocked.Exchange(ref _sendOverflow, 1) == 0)
+                {
+                    LinkLog.Error("发送队列积压超过 " + SendQueueMaxDepth
+                                  + " 条，判定对端已不可用，断开重连");
+                    Reconnect("发送队列积压");
+                }
                 return;
             }
             SendQ.Enqueue(msg);

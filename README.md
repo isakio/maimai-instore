@@ -116,7 +116,7 @@
 
 | 文件 | 干什么 | 校验 |
 | --- | --- | --- |
-| [`client/InStoreLink.dll`](client/InStoreLink.dll) | 联机本体：注册中继、开房、把对方的房间喂回游戏 | v0.3，57856 字节 / md5 `60439bffa6129480dd1ccc734f26d808` |
+| [`client/InStoreLink.dll`](client/InStoreLink.dll) | 联机本体：注册中继、开房、把对方的房间喂回游戏 | v0.3，58368 字节 / md5 `5be583f751ff7e8526f45592a502c37f` |
 | [`client/InStoreMatch.dll`](client/InStoreMatch.dll) | 让选曲界面画出「店内マッチング」那一格 | v2.5，18432 字节 / md5 `1a94a9b6be9b03bfb274e41b0a8256b3` |
 
 两个文件都在本仓库的 [`client/`](client/) 里（[最新 Release](https://github.com/isakio/maimai-instore/releases/latest) 也附了），不用再去别的地方下。
@@ -248,7 +248,7 @@ sudo IMD_ADMIN_TOKEN='你的token' bash instorematchd/install.sh <你的域名�
 
 ## 更新记录
 
-**v0.3（`InStoreLink.dll`，57856 字节 / md5 `60439bffa6129480dd1ccc734f26d808`）**
+**v0.3（`InStoreLink.dll`，58368 字节 / md5 `5be583f751ff7e8526f45592a502c37f`）**
 
 这一版专门修**"没按正常剧本走"的那些情况** —— 正常流程本来就能跑通，但这些岔路以前全是
 "只写一行日志就完事"，玩家侧表现为一直转圈或者莫名其妙掉线：
@@ -261,6 +261,9 @@ sudo IMD_ADMIN_TOKEN='你的token' bash instorematchd/install.sh <你的域名�
 - 房主**开好房等超过 30 秒**，房间不会再从大厅里消失（客户端每 10 秒续报一次）
 - 大厅接口加了身份校验（房间的伪 IP 必须就是上报 keychip 算出来的那个）、
   开房限速与房间总数上限
+- **客户端发送队列加了上限（4096 条）**：中继堵死时不再无界涨内存，到上限就判定
+  "对端不可用"、断开这条连接重连（继续丢包会让上层协议错位，比断开更糟）；
+  正常联机队列深度是 0～个位数，碰不到这条
 
 > 这条一开始写错过：最初是给那个 socket 触发"完成事件"并塞一个错误码，后来反汇编本体
 > 才发现 `ConnectSocket.Execute_Connect` **只看"完成事件来过"这个布尔、根本不看错误码**，

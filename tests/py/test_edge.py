@@ -28,7 +28,8 @@ import urllib.request
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from linkproto import (MockClient, Msg, stub_u32,
-                       CTL_TCP_CONNECT, CTL_TCP_ACCEPT, CTL_TCP_CLOSE, CTL_HEARTBEAT, PROTO_TCP)
+                       CTL_START, CTL_TCP_CONNECT, CTL_TCP_ACCEPT, CTL_TCP_CLOSE, CTL_HEARTBEAT,
+                       DATA_BROADCAST, DATA_SEND, PROTO_TCP, PROTO_UDP)
 
 SERVER = os.environ.get("IMD_SERVER_PY", os.path.normpath(os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "..", "..", "instorematchd", "instorematchd.py")))
@@ -85,7 +86,7 @@ def recruit_body(keychip, stub, music_id=12054, name="测试房主"):
 class Server:
     """起一个临时 instorematchd，并确认**这个进程**真的起来了。"""
 
-    def __init__(self, pending_timeout=10, max_rooms=200, admin_token=None):
+    def __init__(self, pending_timeout=10, max_rooms=200, admin_token=None, **extra):
         self.log = tempfile.NamedTemporaryFile("w+", suffix=".log", delete=False)
         self.proc = None
         argv = [sys.executable, "-B", SERVER, "--bind", HOST,
@@ -95,6 +96,10 @@ class Server:
                 "--max-rooms", str(max_rooms), "--log-level", "INFO"]
         if admin_token:
             argv += ["--admin-token", admin_token]
+        # 第二轮加的开关：--max-clients / --max-clients-per-ip / --send-timeout /
+        # --lobby-timeout / --lobby-max-threads（下划线形式传进来更顺手）。
+        for key, val in extra.items():
+            argv += ["--" + key.replace("_", "-"), str(val)]
         self.proc = subprocess.Popen(
             argv,
             stdout=self.log, stderr=subprocess.STDOUT)
@@ -120,6 +125,22 @@ class Server:
     def log_text(self):
         with open(self.log.name, "r", errors="replace") as f:
             return f.read()
+
+    def threads(self):
+        """服务端进程当前的线程数（第二轮 S3 用它验"慢连接不涨线程"）。"""
+        try:
+            with open("/proc/%d/status" % self.proc.pid) as fh:
+                for line in fh:
+                    if line.startswith("Threads:"):
+                        return int(line.split()[1])
+        except OSError:
+            pass
+        return -1
+
+
+def online_count():
+    _, body = http("GET", "/online")
+    return json.loads(body)["totalUsers"]
 
 
 def case_offline_target():
@@ -459,6 +480,310 @@ def case_oversize_line():
         srv.stop()
 
 
+def case_reregister_identity():
+    print("12) 同一条连接换 keychip 注册 → 身份/在线数不膨胀（S1）")
+    srv = Server()
+    try:
+        c = MockClient("W9EDGEREG001", HOST, RELAY)
+        c.recv()
+        for i in range(50):
+            c.send(Msg(CTL_START, data="W9EDGEREG%03d" % i))
+            time.sleep(0.004)
+        time.sleep(0.4)
+        n = online_count()
+        check(n <= 1, "换 50 次身份后 /online <= 1（实际 %d）" % n)
+        c.close()
+        time.sleep(0.8)
+        check(online_count() == 0, "断开后在线数归零（实际 %d）" % online_count())
+        check("Traceback" not in srv.log_text(), "没有 traceback")
+    finally:
+        srv.stop()
+
+
+def case_nested_body_types():
+    print("13) 请求体嵌套字段类型不符 → 回 4xx，不断连、不 traceback（S2）")
+    srv = Server()
+    try:
+        cases = [
+            ("RecruitInfo=字符串", {"Keychip": "W9EDGENEST1", "RecruitInfo": "hello"}),
+            ("RecruitInfo=列表", {"Keychip": "W9EDGENEST2", "RecruitInfo": ["x"]}),
+            ("MechaInfo=字符串", {"Keychip": "W9EDGENEST3",
+                                  "RecruitInfo": {"MechaInfo": "x"}}),
+            ("MechaInfo=列表", {"Keychip": "W9EDGENEST4",
+                                "RecruitInfo": {"MechaInfo": [1]}}),
+            ("Keychip=数字", {"Keychip": 12345,
+                              "RecruitInfo": {"MechaInfo": {"IpAddress": 1}}}),
+            ("Keychip=对象", {"Keychip": {"a": 1},
+                              "RecruitInfo": {"MechaInfo": {"IpAddress": 1}}}),
+        ]
+        for name, body in cases:
+            for path in ("/recruit/start", "/recruit/finish"):
+                try:
+                    code, _ = http("POST", path, body)
+                except Exception as exc:              # 连接被掐断会在这里冒出来
+                    code = "断连(%s)" % type(exc).__name__
+                check(code in (400, 404),
+                      "%s 走 %s 回 4xx 而不是断连（%s）" % (name, path, code))
+
+        # UserNames / FumenDifs 是怪类型时，开房 + /online + 看板都不能 500 / 断连
+        kc = "W9EDGENEST5"
+        b = recruit_body(kc, stub_u32(kc))
+        b["RecruitInfo"]["MechaInfo"]["UserNames"] = 123
+        b["RecruitInfo"]["MechaInfo"]["FumenDifs"] = 5
+        try:
+            code, _ = http("POST", "/recruit/start", b)
+        except Exception as exc:
+            code = "断连(%s)" % type(exc).__name__
+        check(code == 200, "UserNames/FumenDifs 类型怪但能开房（%s）" % code)
+        for path in ("/online", "/api/status"):
+            try:
+                code, _ = http("GET", path)
+            except Exception as exc:
+                code = "断连(%s)" % type(exc).__name__
+            check(code == 200, "怪字段不影响 %s（%s）" % (path, code))
+        check("Traceback" not in srv.log_text(), "没有 traceback")
+    finally:
+        srv.stop()
+
+
+def case_lobby_threads_bounded():
+    print("14) 大厅慢连接不再无限耗线程（S3，--lobby-max-threads 4 / timeout 2s）")
+    srv = Server(lobby_max_threads=4, lobby_timeout=2)
+    try:
+        base = srv.threads()
+        socks = []
+        for _ in range(20):
+            s = socket.create_connection((HOST, LOBBY), timeout=2)
+            # 只发半个请求头（声明了 body 也不发），挂着
+            s.sendall(b"POST /recruit/start HTTP/1.1\r\nHost: x\r\nContent-Length: 100000\r\n")
+            socks.append(s)
+        time.sleep(1.0)
+        grew = srv.threads() - base
+        check(grew <= 6, "20 条半开连接只占 <=6 个线程（上限 4，实际涨 %d）" % grew)
+        for s in socks:
+            s.close()
+        time.sleep(4.0)                       # 等读取超时把残留连接收掉
+        check(srv.threads() - base <= 2,
+              "关掉后线程回落到基线附近（实际涨 %d）" % (srv.threads() - base))
+        code, _ = http("GET", "/online")
+        check(code == 200, "大厅仍然可用（HTTP %s）" % code)
+        check("Traceback" not in srv.log_text(), "没有 traceback")
+    finally:
+        srv.stop()
+
+
+def case_stuck_reader():
+    print("15) 只连不读的对端不再堵死发送方（S4，--send-timeout 2）")
+    srv = Server(send_timeout=2, heartbeat_timeout=60)
+    try:
+        kb, ka = "W9EDGESLOW01", "W9EDGESLOW02"
+        b = MockClient(kb, HOST, RELAY)
+        b.recv()
+        b.sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4096)   # 缩小接收缓冲，早点堵
+        a = MockClient(ka, HOST, RELAY)
+        a.recv()
+        # 先建一条真流（S6 修好后，DATA_SEND 必须挂在已建成的流上）
+        sid = 60604
+        a.send(Msg(CTL_TCP_CONNECT, proto=PROTO_TCP, sid=sid, src=stub_u32(ka), sport=66004,
+                   dst=stub_u32(kb), dport=50100))
+        b.recv(timeout=2.0)                     # B 收下 CONNECT 后就再也不读了
+        b.send(Msg(CTL_TCP_ACCEPT, proto=PROTO_TCP, sid=sid, src=stub_u32(kb), sport=50100,
+                   dst=stub_u32(ka), dport=66004))
+        a.recv(timeout=2.0)                     # A 收到 ACCEPT，流建成
+        a.sock.settimeout(2.0)
+        big = "x" * 900000
+        for _ in range(40):
+            try:
+                a.send(Msg(DATA_SEND, proto=PROTO_TCP, sid=sid, src=stub_u32(ka),
+                           sport=66004, dst=stub_u32(kb), dport=50100, data=big))
+            except Exception:
+                break
+            time.sleep(0.02)
+        time.sleep(2.5)
+        check(online_count() <= 1,
+              "只连不读的 B 在 send_timeout 后被服务端断开（/online 只剩 A，实际 %d）"
+              % online_count())
+        # A 不该被永久堵住：给它一点时间把积压清掉，然后必须能拿到心跳回包
+        ok = False
+        deadline = time.time() + 6
+        while time.time() < deadline:
+            try:
+                a.sock.settimeout(1.0)
+                a.send(Msg(CTL_HEARTBEAT))
+                m = a.recv(timeout=1.0)
+            except Exception:
+                time.sleep(0.3)
+                continue
+            if m.cmd == CTL_HEARTBEAT:
+                ok = True
+                break
+        check(ok, "灌大包后发送方 A 仍能拿到心跳回包（不再被无限期堵住）")
+        check("Traceback" not in srv.log_text(), "没有 traceback")
+        a.close()
+        b.close()
+    finally:
+        srv.stop()
+
+
+def case_accept_peer_check():
+    print("16) 第三方 ACCEPT 被拒、真房主 ACCEPT 成功（S5）")
+    srv = Server()
+    try:
+        ka, kh, kb = "W9EDGEACC001", "W9EDGEACC002", "W9EDGEACC003"
+        a = MockClient(ka, HOST, RELAY); a.recv()
+        h = MockClient(kh, HOST, RELAY); h.recv()
+        b = MockClient(kb, HOST, RELAY); b.recv()
+        sa, sh, sb = stub_u32(ka), stub_u32(kh), stub_u32(kb)
+        sid = 60601
+        a.send(Msg(CTL_TCP_CONNECT, proto=PROTO_TCP, sid=sid, src=sa, sport=66001,
+                   dst=sh, dport=50100))
+        h.recv(timeout=2.0)
+        # 第三方 B 冒充房主去接（ACCEPT 要发给发起方 A）
+        b.send(Msg(CTL_TCP_ACCEPT, proto=PROTO_TCP, sid=sid, src=sb, sport=50111,
+                   dst=sa, dport=66001))
+        got = b.recv(timeout=2.0)
+        check(got.cmd == CTL_TCP_CLOSE, "第三方 B 的 ACCEPT 被回 CLOSE 拒绝（%s）" % got.readable())
+        # 对照：真房主 H 用同样的 sid 接，必须成功
+        h.send(Msg(CTL_TCP_ACCEPT, proto=PROTO_TCP, sid=sid, src=sh, sport=50100,
+                   dst=sa, dport=66001))
+        got2 = a.recv(timeout=2.0)
+        check(got2.cmd == CTL_TCP_ACCEPT and got2.src == sh,
+              "真房主 H 的 ACCEPT 成功（%s）" % got2.readable())
+        a.close(); h.close(); b.close()
+    finally:
+        srv.stop()
+
+
+def case_host_disconnect_notifies():
+    print("17) 房主掉线 → 挂起方立刻收到 CLOSE（S6）")
+    srv = Server(pending_timeout=30)
+    try:
+        hk, gk = "W9EDGEDROP01", "W9EDGEDROP02"
+        h = MockClient(hk, HOST, RELAY); h.recv()
+        g = MockClient(gk, HOST, RELAY); g.recv()
+        sid = 60602
+        g.send(Msg(CTL_TCP_CONNECT, proto=PROTO_TCP, sid=sid, src=stub_u32(gk), sport=66002,
+                   dst=stub_u32(hk), dport=50100))
+        h.recv(timeout=2.0)                    # 房主确实收到了建流请求
+        h.close()                              # 房主硬退
+        t0 = time.time()
+        got = g.recv(timeout=3.0)
+        dt = time.time() - t0
+        check(got.cmd == CTL_TCP_CLOSE and got.sid == sid,
+              "房主掉线 %.2fs 内挂起方收到 CLOSE（%s）" % (dt, got.readable()))
+        g.close()
+    finally:
+        srv.stop()
+
+
+def case_unsolicited_send_dropped():
+    print("18) 不属于任何已建流的 TCP DATA_SEND 被丢弃（S6）")
+    srv = Server()
+    try:
+        ka, kv = "W9EDGEINJ001", "W9EDGEINJ002"
+        a = MockClient(ka, HOST, RELAY); a.recv()
+        v = MockClient(kv, HOST, RELAY); v.recv()
+        a.send(Msg(DATA_SEND, proto=PROTO_TCP, sid=12345, src=stub_u32(ka), sport=1,
+                   dst=stub_u32(kv), dport=50100, data="aGVsbG8="))
+        leaked = False
+        try:
+            v.recv(timeout=1.5)
+            leaked = True
+        except Exception:
+            leaked = False
+        check(not leaked, "未建流的 DATA_SEND 不再被转发给受害者")
+        # 对照：正常建流后仍然能发数据
+        sid = 60603
+        a.send(Msg(CTL_TCP_CONNECT, proto=PROTO_TCP, sid=sid, src=stub_u32(ka), sport=66003,
+                   dst=stub_u32(kv), dport=50100))
+        v.recv(timeout=2.0)
+        v.send(Msg(CTL_TCP_ACCEPT, proto=PROTO_TCP, sid=sid, src=stub_u32(kv), sport=50100,
+                   dst=stub_u32(ka), dport=66003))
+        a.recv(timeout=2.0)
+        a.send(Msg(DATA_SEND, proto=PROTO_TCP, sid=sid, src=stub_u32(ka), sport=66003,
+                   dst=stub_u32(kv), dport=50100, data="aGk="))
+        got = v.recv(timeout=2.0)
+        check(got.cmd == DATA_SEND and got.data == "aGk=",
+              "对照组：建流后数据正常转发（%s）" % got.readable())
+        a.close(); v.close()
+    finally:
+        srv.stop()
+
+
+def case_relay_client_cap():
+    print("19) 中继连接上限：全局 / 每 IP（S7）")
+    srv = Server(max_clients=4)
+    try:
+        conns = []
+        for i in range(4):
+            c = MockClient("W9EDGECAP%03d" % i, HOST, RELAY); c.recv(); conns.append(c)
+        extra = MockClient("W9EDGECAP999", HOST, RELAY)
+        rejected = False
+        try:
+            extra.recv(timeout=1.5)
+        except Exception:
+            rejected = True
+        check(rejected, "超过 --max-clients 的第 5 条注册被拒绝（连接被关）")
+        check(online_count() == 4, "在线数停在上限 4（实际 %d）" % online_count())
+        for c in conns:
+            c.close()
+        extra.close()
+    finally:
+        srv.stop()
+
+    srv = Server(max_clients_per_ip=3)
+    try:
+        conns = []
+        for i in range(3):
+            c = MockClient("W9EDGEIPC%03d" % i, HOST, RELAY); c.recv(); conns.append(c)
+        extra = MockClient("W9EDGEIPC999", HOST, RELAY)
+        rejected = False
+        try:
+            extra.recv(timeout=1.5)
+        except Exception:
+            rejected = True
+        check(rejected, "超过 --max-clients-per-ip 的第 4 条被拒绝")
+        check(online_count() == 3, "在线数停在上限 3（实际 %d）" % online_count())
+        for c in conns:
+            c.close()
+        extra.close()
+    finally:
+        srv.stop()
+
+
+def case_broadcast_rate_limited():
+    print("20) UDP 广播被限速（S7）")
+    srv = Server()
+    try:
+        cs = []
+        for i in range(8):
+            c = MockClient("W9EDGEBC%03d" % i, HOST, RELAY); c.recv(); cs.append(c)
+        sender = cs[0]
+        for _ in range(50):
+            sender.send(Msg(DATA_BROADCAST, proto=PROTO_UDP, sid=1,
+                            src=stub_u32(sender.keychip), sport=5000, dst=0, dport=5001,
+                            data="aGk="))
+        time.sleep(0.8)
+        got = 0
+        for c in cs[1:]:
+            c.sock.settimeout(0.05)
+            while True:
+                try:
+                    chunk = c.sock.recv(65536)
+                except Exception:
+                    break
+                if not chunk:
+                    break
+                got += chunk.count(b"\n")
+        # 不限速会是 7 个收件人 × 50 条 = 350；限速后每个收件人 <= BROADCAST_RATE_MAX(10)
+        check(got <= 7 * 10, "50 条广播被限速到 <=70 次转发（实际 %d）" % got)
+        check(got >= 1, "限速没有把广播全挡死（实际 %d）" % got)
+        for c in cs:
+            c.close()
+    finally:
+        srv.stop()
+
+
 def main():
     if not os.path.exists(SERVER):
         print("找不到服务端脚本：%s（用 IMD_SERVER_PY 指定）" % SERVER)
@@ -492,6 +817,16 @@ def main():
     case_admin_token()
     case_stream_cap()
     case_oversize_line()
+    # 第二轮边界/压力审计的回归（S1–S7）
+    case_reregister_identity()
+    case_nested_body_types()
+    case_lobby_threads_bounded()
+    case_stuck_reader()
+    case_accept_peer_check()
+    case_host_disconnect_notifies()
+    case_unsolicited_send_dropped()
+    case_relay_client_cap()
+    case_broadcast_rate_limited()
 
     print()
     if FAIL:

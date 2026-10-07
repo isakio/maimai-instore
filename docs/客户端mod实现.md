@@ -77,7 +77,7 @@ docs/客户端mod实现.md          ← 本文件
 2. **刷卡登录**：本体走到 `OperationManager.CheckAuth_Proc`，mod 在这里
    - 随机生成 keychip（`"W9" + 9 位随机数`）→ 算出本机伪 IP；
    - 连中继 TCP，发 `CTL_START`（data = keychip），收到 `version=1` 表示注册成功；
-   - 起两个线程：每 10ms 抽一次发送队列（每 1 秒插一个心跳），另起一个读循环。
+   - 起两个线程：每 10ms 抽一次发送队列（每 1 秒插一个心跳；发送队列上限 4096 条，超了判定"对端不可用"并断开重连），另起一个读循环。
 3. **跳过联网自检**：本体启动时会先做一次"店里网络自检"（`StartupProcess`），
    mod 直接把状态机从 `0x04`（等自检）推到 `0x08`（就绪），并手动把
    `DeliveryChecker` / `Setting` / `Advertise` / `PartyMan` 拉起来。
@@ -335,6 +335,7 @@ v0.3 补上这几条（服务端 `instorematchd`，客户端配合）：
 | 18 | 被我们拒掉的房间（歌没装）记一笔，不再无限重喂 | 拒掉之后游戏永远不会"有这个房间"，对账每 2 秒又会喂一次 —— 无限重试 + 无限刷日志（`_deliveredAt` 那本账也因此越积越多）。现在房间从大厅消失时会把两本账一起清掉 |
 | 19 | `StartRecruitPolling` 幂等 | 它挂在 `Client` 构造函数上，而 `Interval()` 每次无条件起一条线程：本体如果每进一次选曲就重建 party 客户端，就是每进一次多一条 10 秒轮询线程 |
 | 20 | 找 `SocketAsyncEventArgs.Completed` 事件背后字段时**兼容多个运行时** | 上游写死 `GetField("Completed")`。这个字段名跟运行时有关：游戏里的 Unity Mono 叫 `Completed`，桌面 .NET Framework 叫 `m_Completed`。名字对不上时 `GetField` 返回 null，**连接完成回调就静默不触发**（游戏永远等下去），日志里一个字都没有 —— 这正是 `tests/ClientTests.cs` 加进来之后第一轮就抓到的 |
+| 21 | **发送队列（`SendQ`）加上限 4096，超限判定"对端不可用"并断开重连** | 上游/旧实现是无界 `ConcurrentQueue`：中继堵死（或对面只连不读）时发送线程卡在 `WriteLine`，队列只增不减，内存无限涨。现在 `Send()` 入队前看深度，到上限就丢报计数并触发一次 `Reconnect`（不是无限丢包——本体的包带序列/确认，丢包会让协议错位）。正常联机队列深度 0～个位数，行为不变 |
 
 > 和 `InStoreMatch.dll` 的关系：那个负责**让分类栏出现「店内マッチング」这一格**（本体快照问题），
 > 这个负责**把那一格接到公网**。两个都要装，而且装了 `InStoreLink.dll` 就**必须删掉
@@ -397,10 +398,10 @@ bash tests/run_all.sh        # 十步全跑，一分钟左右
 | --- | --- | --- |
 | 编译 | 源码 ↔ 游戏本体 API 是否对得上 | ✅ 通过（`build/InStoreLink.dll`） |
 | `tests/ProtocolTests.cs` | 序列化/解析往返、伪 IP、配置解析（41 项） | ✅ 全绿 |
-| `tests/ClientTests.cs` | **客户端逻辑**（脱离游戏跑）：建流挂起 / 接流成功、超时、CLOSE 取消、失败按流绑定（防串号）、失败条子的保质期、待 Accept 队列清理、连开 200 条流 key 不重复、监听 socket 关闭时端口队列一起清（**按协议**，别误删同端口 TCP 的）、坏 base64 包丢掉不崩、Close 后收发不抛异常（31 项） | ✅ 全绿 |
+| `tests/ClientTests.cs` | **客户端逻辑**（脱离游戏跑）：建流挂起 / 接流成功、超时、CLOSE 取消、失败按流绑定（防串号）、失败条子的保质期、待 Accept 队列清理、连开 200 条流 key 不重复、监听 socket 关闭时端口队列一起清（**按协议**，别误删同端口 TCP 的）、坏 base64 包丢掉不崩、Close 后收发不抛异常、发送队列到上限判定对端不可用并断开（36 项） | ✅ 全绿 |
 | `tests/py/test_vectors.py` | 同一批向量 + **用真实抓包日志反验**（17 项；日志目录里真有流报文时多 1 项：18 项） | ✅ 全绿（12 种真实报文全部能还原） |
 | `tests/py/test_e2e.py` | 起真的 instorematchd，跑完 开房→列表→建流→传数据→大包→关流→关房（19 项） | ✅ 全绿 |
-| `tests/py/test_edge.py` | **异常流程**：房主先开打 / 目标不在线 / 反复重试 / 挂起超时回收 / 身份校验 / 幽灵房不公开 / 限速与房间上限，外加每次拒绝都带原因、畸形请求体不能掐断连接、不带 keychip 的注册只警告不抛 traceback、非 ASCII token 不断连、已建成流数有上限、IpAddress 非整数不打崩请求、不注册刷消息会限流断开、单行超过 1 MiB 只跳过这一行不断连（50 项） | ✅ 全绿 |
+| `tests/py/test_edge.py` | **异常流程 / 边界压力**：房主先开打 / 目标不在线 / 反复重试 / 挂起超时回收 / 身份校验 / 幽灵房不公开 / 限速与房间上限，外加每次拒绝都带原因、畸形请求体（含 `RecruitInfo`/`MechaInfo` 嵌套字段类型不符）不能掐断连接、不带 keychip 的注册只警告不抛 traceback、非 ASCII token 不断连、已建成流数有上限、IpAddress 非整数不打崩请求、不注册刷消息会限流断开、单行超过 1 MiB 只跳过这一行不断连、同连接换 keychip 注册不泄漏身份、大厅慢连接不涨线程、只连不读不断堵死发送方、第三方不能替你接流、不属于已建流的 TCP 数据被丢弃、中继连接上限与 UDP 广播限速（87 项） | ✅ 全绿 |
 | `tests/py/live_smoke.py` | **线上烟测**（不放进 `run_all.sh`，会往公开大厅临时开房）：对着真在跑的大厅把上面那些场景再走一遍，外加"第二个房客""房主中途掉线""房间 TTL vs 续报""幽灵房不公开""10 个房间选哪间进哪间"（25 项） | ✅ 全绿（打的就是 `isakio.cn`） |
 | `tests/GameCompatProbe.cs` | **游戏兼容性探针**：补丁目标方法是否存在、注入字段类型是否匹配、反射句柄拿不拿得到，外加 InStoreMatch 按字符串反射的那些名字（`SelectorTab._tabDatas` / `GenreSelectController.SortType2Genre` / `GameManager.<IsFreedomMode>k__BackingField`、`MonitorBase.isPlayerActive` …）一起守着（82 项） | ✅ 全绿 |
 | `tools/check_patch_params.cs` | **参数名检查**：两个 dll 的补丁（InStoreLink 34 条 + InStoreMatch 8 个补丁方法）的普通参数名逐个和游戏对齐，外加 Prefix/Postfix 标注、`___字段` 是否存在（Harmony 是按名字传参的） | ✅ 全绿 |

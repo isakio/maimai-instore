@@ -94,6 +94,7 @@ public static class ClientTests
         TestBindQueuesReleasedOnClose();
         TestBadBase64IsDropped();
         TestStrayOpsAfterClose();
+        TestSendQueueCap();
 
         Console.WriteLine();
         Console.WriteLine("通过 " + _pass + " 项，失败 " + _fail + " 项");
@@ -310,6 +311,44 @@ public static class ClientTests
         }
         catch (Exception ex) { threw = true; Console.WriteLine("      " + ex.GetType().Name); }
         Check(!threw, "Close 之后的收发不会抛异常出来");
+    }
+
+    /// <summary>
+    /// 发送队列必须有上限：中继堵死时 Send() 会被游戏主线程高频调用，无界队列会把
+    /// 内存涨爆（旧实现就是无界 ConcurrentQueue）。到上限就判定"对端不可用"、断开这条
+    /// 连接，把多出来的报文丢掉并计数 —— 而不是无限入队，也不是继续丢包：本体的包带
+    /// 序列/确认，丢包会让上层协议错位，比断开更糟。
+    /// </summary>
+    private static void TestSendQueueCap()
+    {
+        Console.WriteLine("12) SendQ 有上限：超上限判定对端不可用、断开重连，不再无界增长");
+        int saved = LinkClient.SendQueueMaxDepth;
+        LinkClient.SendQueueMaxDepth = 16;
+        LinkClient c = NewClient("W9CLIENT0010");
+
+        // 正常路径：几条包远不到上限，一个都不能丢、也不该触发断开
+        for (int i = 0; i < 5; i++)
+            c.Send(new LinkMsg
+            {
+                Cmd = (int)LinkCmd.DataBroadcast, Proto = LinkProto.Udp,
+                DPort = 50100, Data = "ok" + i
+            });
+        Check(c.SendQ.Count == 5, "正常量（5 条）全部入队，没丢（队列 " + c.SendQ.Count + "）");
+        Check(c.SendDropped == 0 && !c.SendOverflowed, "正常路径不触发丢弃 / 断开");
+
+        // 塞爆：一路发到远超上限
+        for (int i = 0; i < 100; i++)
+            c.Send(new LinkMsg
+            {
+                Cmd = (int)LinkCmd.DataBroadcast, Proto = LinkProto.Udp,
+                DPort = 50100, Data = "flood" + i
+            });
+
+        Check(c.SendQ.Count <= 16, "队列深度被卡在上限内（实际 " + c.SendQ.Count + "）");
+        Check(c.SendDropped > 0, "超出上限的报文被丢弃并计数（丢了 " + c.SendDropped + " 条）");
+        Check(c.SendOverflowed, "已判定对端不可用、触发断开重连");
+
+        LinkClient.SendQueueMaxDepth = saved;
     }
 
     private static void TestCloseDropsQueuedAccept()
