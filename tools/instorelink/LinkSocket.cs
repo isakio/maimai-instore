@@ -345,13 +345,19 @@ namespace InStoreLink
             // 监听用的影子 socket（_streamId == -1，只有 Bind 过端口）关掉时，把它在
             // client 里注册的那条端口队列也摘掉：AcceptQ / UdpRecvQ 都是按端口建一次、
             // 以前**从不删除** —— 本体每开一次联机会话就 Bind 一次新端口，这几张表只增不减。
-            // （接流造出来的 socket 也带着同一个 _bindPort，但它 _streamId != -1，
-            //   不会走到这里，不会误删还在用的监听队列。）
+            //
+            // ★ 必须**按协议**只摘自己那条队列：本体在**同一个端口号**上同时 Bind 了
+            //   Udp 和 Tcp（真机日志里 50100 上就有 Udp×2 + Tcp×1）。不分协议的话，
+            //   关掉那条 UDP 会把 TCP 监听器的 AcceptQ[50100] 一起删掉 —— 别人发来的
+            //   建流请求到了也没人接，对方"一进去就被拒绝/超时"。这是真踩到的：
+            //   两边都是真客户端（自己当房主）时必现，而当房主的是 Python 假玩家时就看不出来。
+            //   （接流造出来的 socket 也带着同一个 _bindPort，但它 _streamId != -1，
+            //    不会走到这里，不会误删还在用的监听队列。）
             if (_streamId == -1 && _bindPort > 0)
             {
                 ConcurrentQueue<LinkMsg> dropped;
-                _client.AcceptQ.TryRemove(_bindPort, out dropped);
-                _client.UdpRecvQ.TryRemove(_bindPort, out dropped);
+                if (_proto == LinkProto.Tcp) _client.AcceptQ.TryRemove(_bindPort, out dropped);
+                else if (_proto == LinkProto.Udp) _client.UdpRecvQ.TryRemove(_bindPort, out dropped);
             }
         }
 

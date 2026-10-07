@@ -235,6 +235,18 @@ public static class ClientTests
             System.Net.Sockets.SocketType.Stream, System.Net.Sockets.ProtocolType.Tcp, 0);
         tcp.Bind(new System.Net.IPEndPoint(System.Net.IPAddress.Loopback, 60012));
         Check(c.AcceptQ.ContainsKey(60012), "Bind 之后 AcceptQ 里有这个端口");
+
+        // ★ 本体在**同一个端口号**上会同时 Bind Udp 和 Tcp（真机日志：50100 上有 Udp×2 + Tcp×1）。
+        //   关掉那条 UDP 不能把 TCP 监听器的 AcceptQ 一起删掉 —— 删了别人就进不来
+        //   （玩家侧表现："一进去就被拒绝/超时"，而且只有两边都是真客户端时才现）。
+        LinkSocket udpSame = new LinkSocket(System.Net.Sockets.AddressFamily.InterNetwork,
+            System.Net.Sockets.SocketType.Dgram, System.Net.Sockets.ProtocolType.Udp, 0);
+        udpSame.Bind(new System.Net.IPEndPoint(System.Net.IPAddress.Loopback, 60012));
+        Check(c.UdpRecvQ.ContainsKey(60012), "同一端口再 Bind 一条 UDP：UdpRecvQ 里有它");
+        udpSame.Close();
+        Check(!c.UdpRecvQ.ContainsKey(60012), "关掉那条 UDP：UdpRecvQ 里的端口被摘掉");
+        Check(c.AcceptQ.ContainsKey(60012), "关掉那条 UDP **不影响** TCP 的 AcceptQ");
+
         tcp.Close();
         Check(!c.AcceptQ.ContainsKey(60012), "Close 之后 AcceptQ 里的端口被摘掉");
     }
