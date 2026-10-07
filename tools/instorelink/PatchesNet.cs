@@ -127,6 +127,12 @@ namespace InStoreLink
         [HarmonyPatch(typeof(SocketBase), "sendClass", typeof(ICommandParam))]
         public static bool PreSendClass(SocketBase __instance, ICommandParam info)
         {
+            // 吞掉的两个都是"店外 UDP 广播/局域网发现"，我们的联机走大厅+中继，用不上：
+            //   * AdvocateDelivery —— 只有 DeliveryChecker（店内 LAN 重号检测）会发，
+            //     不是 Advertise 状态机（那发的是 AdvertiseRequest/Response/Go）。
+            //     而且 DeliveryChecker 的 _sendCount++ 在 sendClass 之外自增，吞掉包
+            //     也不影响它 ServerCheck→ServerActive 的推进（审计 C1 复核过）。
+            //   * SettingHostAddress —— 本体用来广播本机地址给同店机台。
             if (info is AdvocateDelivery || info is Setting.SettingHostAddress)
                 return false;                       // 店外广播，直接吞掉
 
@@ -219,6 +225,14 @@ namespace InStoreLink
             }
 
             // 本体停在"等待联网自检"时，直接把它推进到就绪，并手动把该起的服务起起来
+            //
+            // 这是一处**刻意激进**的取舍：0x04=WaitLinkDelivery → 0x08=Ready，
+            // 跳过 WaitLinkSetting / WaitLinkParty / WaitLinkAdvertise 三个状态。
+            // 理由：这三个状态是在店内 LAN 上做"等待组网/广播选主"，我们的联机走
+            // 大厅 + 中继，不需要它们；不跳过的话本体在单机/无 LAN 环境会一直卡在自检。
+            // 代价：本体的 LAN 组网状态机不会自然跑完，所以下面手动补一次
+            // DeliveryChecker/Setting/Advertise/Party 的初始化（整段 try/catch 兜住，
+            // 任何一步拿不到单例都不能把启动流程带崩）。真机日志确认走到了这里。
             if (____state != 0x04) return;
             ____state = 0x08;
 

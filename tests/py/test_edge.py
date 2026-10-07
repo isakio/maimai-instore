@@ -425,6 +425,40 @@ def case_admin_token():
         srv.stop()
 
 
+def case_oversize_line():
+    print("11) 单行超过 1 MiB → 只跳过这一行，不断开连接")
+    # 服务端 StreamReader 的 limit 就是 RELAY_LINE_LIMIT（1 MiB）。发一条**不带换行**、
+    # 超过 limit 的数据：asyncio 的 readline() 会走"找不到分隔符且超限"那条路 ——
+    # 它把 LimitOverrunError 转成 ValueError 抛出（并已把超长缓冲清掉）。
+    # 以前这个 ValueError 没被接住，会掉到最外层 except → break → 整条连接被踢。
+    kc = "W9EDGEBIG001"
+    srv = Server()
+    try:
+        c = MockClient(kc, HOST, RELAY)
+        c.recv()                               # 注册回包
+        try:
+            # 分块发，确保服务端在读的时候缓冲确实越过 limit（一次全塞进去也行，
+            # 但分块能稳定命中"超限时还没见到换行"这个分支）。
+            block = b"x" * 65536
+            for _ in range(17):                # 17 * 64 KiB = 1088 KiB > 1 MiB
+                c.sock.sendall(block)
+                time.sleep(0.01)
+            time.sleep(0.3)                    # 给服务端 readline 走到超限分支
+            c.sock.sendall(b"\n")              # 这条坏行到此结束
+            # 连接必须还活着：退一条心跳，要有心跳回包。
+            c.send(Msg(CTL_HEARTBEAT))
+            got = c.recv(timeout=3.0)
+            check(got.cmd == CTL_HEARTBEAT,
+                  "超长行之后连接仍然活着（心跳有回包）", got.readable())
+        except Exception as e:
+            check(False, "超长行之后连接仍然活着（心跳有回包）", str(e))
+        c.close()
+        check("Traceback" not in srv.log_text(),
+              "超长行跳过时服务端没有 traceback")
+    finally:
+        srv.stop()
+
+
 def main():
     if not os.path.exists(SERVER):
         print("找不到服务端脚本：%s（用 IMD_SERVER_PY 指定）" % SERVER)
@@ -457,6 +491,7 @@ def main():
     case_limits()
     case_admin_token()
     case_stream_cap()
+    case_oversize_line()
 
     print()
     if FAIL:

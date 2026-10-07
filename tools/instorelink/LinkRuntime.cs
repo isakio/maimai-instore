@@ -315,6 +315,15 @@ namespace InStoreLink
         {
             Stopping = true;
             if (Client != null) Client.Stop();
+            // 审计 C3：Redirect（NFSocket→影子 socket）和三张接收队列是"只增不减"的账本 ——
+            // LinkClient 一个进程只 new 一次，跨局保留；异常生命周期下（socket 没走正常
+            // Close）可能留残留。这里**没有**做清理，是刻意的：
+            //   * 进程马上就要退出，OS 会回收，清了也只是好看；
+            //   * 更关键的是**联机中途清不得** —— Redirect 一空，游戏手里那个 NFSocket
+            //     就会掉回真 socket（会真去连网）；队列一清，在途的流数据也会丢。
+            // 残留本身不致命（NoShadow 兜底防 ObjectDisposedException），真要做"退出时清理"
+            // 得连 client/ 的发行 dll 一起重编重发，为一个只影响"账本好看"的问题不值得，
+            // 所以先按注释记录，留着以后有别的改动时顺手做。
         }
 
         // ---------------------------------------------------------------- 小工具

@@ -336,6 +336,7 @@ class RelayClient:
         self.last_heartbeat = time.time()
         self.connected_at = time.time()
         self.unregistered = 0        # 收到多少条"还没注册就发过来的"消息（用来限流告警）
+        self.oversize = 0            # 收到多少条"单行超过 RELAY_LINE_LIMIT"的坏行（用来限流告警）
         self._lock = asyncio.Lock()
         self.closed = False
 
@@ -605,6 +606,19 @@ async def relay_serve(host: str, port: int, heartbeat_timeout: int,
                 except asyncio.TimeoutError:
                     STATE.log_event("断开", f"{client.keychip or peer[0]} 心跳超时")
                     break
+                except ValueError:
+                    # 单行超过 limit（见 RELAY_LINE_LIMIT）时 readline() 抛 ValueError ——
+                    # asyncio 内部是 LimitOverrunError，readline 把它转成 ValueError，
+                    # 并且已经把那段超长缓冲消费/清空（连接状态是干净的）。以前这里没接，
+                    # 会掉到最外层 except → break → 整条连接被踢：公开端口上任何人发一条
+                    # >1 MiB 的无换行数据，就能把自己的连接搞断；合法客户端真发大包也会被误伤。
+                    # 一条坏行不该拖垮整条连接：记一笔、跳过这一行、接着读下一条。
+                    # 计数限流（照 unregistered 的做法），免得有人拿超长行刷日志。
+                    client.oversize += 1
+                    if client.oversize <= 3:
+                        LOG.warning("单行超过 %d 字节，已跳过（来源 %s）",
+                                    RELAY_LINE_LIMIT, client.keychip or peer[0])
+                    continue
                 if not raw:
                     break
                 line = raw.decode("utf-8", "replace").strip()

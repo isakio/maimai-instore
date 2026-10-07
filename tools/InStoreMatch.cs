@@ -514,6 +514,14 @@ namespace InStoreMatch
         // CategoryNameList 的长度被 CategoryScrollRight/Left 当作滚动边界。
         // NyanLink 事后把 198 塞进 GenreSelectDataList 时没同步补名字，
         // 导致最后一格滚不到。这里按差值补上（正常情况就是少 1 项）。
+        //
+        // 位置：本体永远把 198（店内マッチング）追加在**末尾**，CategoryNameList 里
+        // 对应的名字也在末尾，所以"补在末尾"就是对的位置（审计 C2 复核过）。
+        // 实测（MelonLoader 日志 26-10-7_15-18-14）里 CategoryNameList 一直等于 genre 数
+        // （29/29、101/101、12/12、5/5），这条从来没真的补过 —— 属于防御性兜底；
+        // 真要补的时候它防的是 CategoryNameList 比 _combineMusicDataList 短一格，
+        // 那样 GetMusicCategoryNameFromGenreIndex 的 CategoryNameList[num] 会越界
+        // （审计 B2：只在本体计数不同步时才可能，实测未触发）。
         private static void EnsureConnectName(MusicSelectProcess p, int genreCount)
         {
             try

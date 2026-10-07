@@ -400,7 +400,7 @@ bash tests/run_all.sh        # 十步全跑，一分钟左右
 | `tests/ClientTests.cs` | **客户端逻辑**（脱离游戏跑）：建流挂起 / 接流成功、超时、CLOSE 取消、失败按流绑定（防串号）、失败条子的保质期、待 Accept 队列清理、连开 200 条流 key 不重复、监听 socket 关闭时端口队列一起清（**按协议**，别误删同端口 TCP 的）、坏 base64 包丢掉不崩、Close 后收发不抛异常（31 项） | ✅ 全绿 |
 | `tests/py/test_vectors.py` | 同一批向量 + **用真实抓包日志反验**（17 项；日志目录里真有流报文时多 1 项：18 项） | ✅ 全绿（12 种真实报文全部能还原） |
 | `tests/py/test_e2e.py` | 起真的 instorematchd，跑完 开房→列表→建流→传数据→大包→关流→关房（19 项） | ✅ 全绿 |
-| `tests/py/test_edge.py` | **异常流程**：房主先开打 / 目标不在线 / 反复重试 / 挂起超时回收 / 身份校验 / 幽灵房不公开 / 限速与房间上限，外加每次拒绝都带原因、畸形请求体不能掐断连接、不带 keychip 的注册只警告不抛 traceback、非 ASCII token 不断连、已建成流数有上限、IpAddress 非整数不打崩请求、不注册刷消息会限流断开（48 项） | ✅ 全绿 |
+| `tests/py/test_edge.py` | **异常流程**：房主先开打 / 目标不在线 / 反复重试 / 挂起超时回收 / 身份校验 / 幽灵房不公开 / 限速与房间上限，外加每次拒绝都带原因、畸形请求体不能掐断连接、不带 keychip 的注册只警告不抛 traceback、非 ASCII token 不断连、已建成流数有上限、IpAddress 非整数不打崩请求、不注册刷消息会限流断开、单行超过 1 MiB 只跳过这一行不断连（50 项） | ✅ 全绿 |
 | `tests/py/live_smoke.py` | **线上烟测**（不放进 `run_all.sh`，会往公开大厅临时开房）：对着真在跑的大厅把上面那些场景再走一遍，外加"第二个房客""房主中途掉线""房间 TTL vs 续报""幽灵房不公开""10 个房间选哪间进哪间"（25 项） | ✅ 全绿（打的就是 `isakio.cn`） |
 | `tests/GameCompatProbe.cs` | **游戏兼容性探针**：补丁目标方法是否存在、注入字段类型是否匹配、反射句柄拿不拿得到，外加 InStoreMatch 按字符串反射的那些名字（`SelectorTab._tabDatas` / `GenreSelectController.SortType2Genre` / `GameManager.<IsFreedomMode>k__BackingField`、`MonitorBase.isPlayerActive` …）一起守着（82 项） | ✅ 全绿 |
 | `tools/check_patch_params.cs` | **参数名检查**：两个 dll 的补丁（InStoreLink 34 条 + InStoreMatch 8 个补丁方法）的普通参数名逐个和游戏对齐，外加 Prefix/Postfix 标注、`___字段` 是否存在（Harmony 是按名字传参的） | ✅ 全绿 |
