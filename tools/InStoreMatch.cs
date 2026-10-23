@@ -327,6 +327,7 @@ namespace InStoreMatch
 
         private static int _lastTabCount = -2;
         private static int _tick;
+        private static int _lastScanTick = -1000;
         private static bool _dumpedOnce;
 
         private static bool HasConnectGenre(MusicSelectProcess p)
@@ -675,7 +676,6 @@ namespace InStoreMatch
             public static void Postfix(MusicSelectProcess __instance)
             {
                 _tick++;
-                MaybeRebuild(__instance, "定时对账", false);
 
                 // 第一次尽快输出，之后每 30 秒一次，避免刷屏
                 if (!_dumpedOnce || _tick % 1800 == 0)
@@ -683,6 +683,11 @@ namespace InStoreMatch
                     _dumpedOnce = true;
                     Dump(__instance);
                 }
+
+                // 标签栏对账不需要每帧做；10 帧一次足够，能避免每帧反射 + 重建。
+                if (_tick - _lastScanTick < 10) return;
+                _lastScanTick = _tick;
+                MaybeRebuild(__instance, "定时对账", false);
             }
         }
 
@@ -742,6 +747,10 @@ namespace InStoreMatch
         [HarmonyPatch(typeof(Process.SubSequence.GenreSelectSequence), "CheckButton")]
         public static class PatchGenreCheckButton
         {
+            private static int _lastCount = -1;
+            private static int _lastCur = -1;
+            private static bool _lastVisible;
+
             public static void Postfix(Process.SubSequence.GenreSelectSequence __instance)
             {
                 if (!ShowRightArrow) return;
@@ -753,7 +762,12 @@ namespace InStoreMatch
                     if (realCount <= 0) return;
                     object curObj = Prop(proc, "CurrentCategorySelect");
                     int cur = curObj == null ? 0 : Convert.ToInt32(curObj);
-                    SetButton(proc, 2, cur + 1 < realCount);
+                    bool visible = cur + 1 < realCount;
+                    if (realCount == _lastCount && cur == _lastCur && visible == _lastVisible) return;
+                    _lastCount = realCount;
+                    _lastCur = cur;
+                    _lastVisible = visible;
+                    SetButton(proc, 2, visible);
                 }
                 catch (Exception) { }
             }

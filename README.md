@@ -73,7 +73,7 @@
 
 ```
 ├── client/                        ← 装客户端要的东西全在这儿
-│   ├── InStoreLink.dll            ← 联机 mod（v0.3，替代上游 WorldLink.dll）
+│   ├── InStoreLink.dll            ← 联机 mod（v0.3.1，替代上游 WorldLink.dll）
 │   ├── InStoreMatch.dll           ← 让「店内マッチング」那一格画出来（v2.5）
 │   └── install.ps1                ← 一条命令：拷两个 dll + 停用旧的 + 写 InStoreLink.toml
 ├── tools/
@@ -116,8 +116,8 @@
 
 | 文件 | 干什么 | 校验 |
 | --- | --- | --- |
-| [`client/InStoreLink.dll`](client/InStoreLink.dll) | 联机本体：注册中继、开房、把对方的房间喂回游戏 | v0.3，58368 字节 / md5 `5be583f751ff7e8526f45592a502c37f` |
-| [`client/InStoreMatch.dll`](client/InStoreMatch.dll) | 让选曲界面画出「店内マッチング」那一格 | v2.5，18432 字节 / md5 `1a94a9b6be9b03bfb274e41b0a8256b3` |
+| [`client/InStoreLink.dll`](client/InStoreLink.dll) | 联机本体：注册中继、开房、把对方的房间喂回游戏 | v0.3.1，57344 字节 / md5 `0c724f1861a4da554854b22ce45253d5` |
+| [`client/InStoreMatch.dll`](client/InStoreMatch.dll) | 让选曲界面画出「店内マッチング」那一格 | v2.5，18432 字节 / md5 `cc9e635ee708efbedb5cac1981f31cd8` |
 
 两个文件都在本仓库的 [`client/`](client/) 里（[最新 Release](https://github.com/isakio/maimai-instore/releases/latest) 也附了），不用再去别的地方下。
 
@@ -167,7 +167,7 @@ powershell -ExecutionPolicy Bypass -File .\client\install.ps1
 **验收**：`MelonLoader\Logs\Latest.log` 里应该有
 
 ```
-[InStoreLink] InStoreLink 0.3.0 已加载（配置 InStoreLink.toml，大厅 http://isakio.cn:20100，详细日志 关）
+[InStoreLink] InStoreLink 0.3.1 已加载（配置 InStoreLink.toml，大厅 http://isakio.cn:20100，详细日志 关）
 [InStoreLink]   ✓ PreCheckAuth → OperationManager.CheckAuth_Proc
 ...（一共 34 行“✓ 补丁名 → 目标方法”）
 [InStoreLink] 挂钩完成，共 34 条生效
@@ -248,10 +248,14 @@ sudo IMD_ADMIN_TOKEN='你的token' bash instorematchd/install.sh <你的域名�
 
 ## 更新记录
 
-**v0.3（`InStoreLink.dll`，58368 字节 / md5 `5be583f751ff7e8526f45592a502c37f`）**
+**v0.3.1（`InStoreLink.dll`，57344 字节 / md5 `0c724f1861a4da554854b22ce45253d5`）**
 
-这一版专门修**"没按正常剧本走"的那些情况** —— 正常流程本来就能跑通，但这些岔路以前全是
-"只写一行日志就完事"，玩家侧表现为一直转圈或者莫名其妙掉线：
+这一版是联机客户端/服务端的**内部重写**：协议不变，重点是把主线程热路径从
+"每帧读房间列表 + 拼签名 + 刷新 TMP"改成"后台发布 `RoomSnapshot`、主线程只在新版本出现时对账"，
+并把发送线程改成事件唤醒。目的是修掉之前改完后游戏本体掉帧/卡顿的问题。
+
+v0.3 时代针对**"没按正常剧本走"**的异常流程修复全部保留 —— 正常流程本来就能跑通，但这些
+岔路以前全是"只写一行日志就完事"，玩家侧表现为一直转圈或者莫名其妙掉线：
 
 - 房主**没等人就开打**（或者直接退了），已经点了"加入"的人不会再卡在连接中：
   服务端会把挂起的建流取消并通知两边；客户端最多 8 秒收尾，并且是走**本体自己的
@@ -271,7 +275,7 @@ sudo IMD_ADMIN_TOKEN='你的token' bash instorematchd/install.sh <你的域名�
 > 然后卡在联机选曲那边。现在改成调 `SocketBase.error()`，让游戏按它自己的失败流程收尾。
 
 服务端改动是**向后兼容**的：老版本客户端连新服务端照常能玩，只是享受不到上面这些兜底。
-两边都升级到 v0.3 体验最好。逐条验证在 `tests/py/test_edge.py` 与 `tests/ClientTests.cs`。
+两边都升级到 v0.3.1 体验最好。逐条验证在 `tests/py/test_edge.py` 与 `tests/ClientTests.cs`。
 
 ## 已知问题
 

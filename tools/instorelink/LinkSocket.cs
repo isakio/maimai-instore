@@ -207,9 +207,8 @@ namespace InStoreLink
             {
                 try
                 {
-                    SocketAsyncEventArgs args = new SocketAsyncEventArgs();
-                    args.SocketError = error;
-                    handler.DynamicInvoke(e, args);
+                    e.SocketError = error;
+                    handler.DynamicInvoke(e, e);
                 }
                 catch (Exception ex)
                 {
@@ -261,7 +260,7 @@ namespace InStoreLink
                 SPort = _bindPort,
                 Dst = LinkStub.ToU32(remote.Address),
                 DPort = remote.Port,
-                Data = ToBase64(buffer, offset, size)
+                Data = Convert.ToBase64String(buffer, offset, size)
             });
             return size;
         }
@@ -366,11 +365,5 @@ namespace InStoreLink
             Close();
         }
 
-        private static string ToBase64(byte[] buffer, int offset, int size)
-        {
-            byte[] slice = new byte[size];
-            Array.Copy(buffer, offset, slice, 0, size);
-            return Convert.ToBase64String(slice);
-        }
     }
 }

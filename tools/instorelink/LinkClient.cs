@@ -49,7 +49,6 @@ namespace InStoreLink
         public const int StatusConnecting = 1;
         public const int StatusConnected = 2;
 
-        private const int SendTickMs = 10;         // 发送线程的节拍
         private const int HeartbeatMs = 1000;      // 心跳间隔
         private const int DelayWindowSize = 20;    // 延迟滑动窗口
         /// <summary>
@@ -99,6 +98,8 @@ namespace InStoreLink
         private readonly long[] _delayWindow = new long[DelayWindowSize];
         private int _delayIndex;
         private long _delayAvg;
+        private readonly AutoResetEvent _sendWake = new AutoResetEvent(false);
+        private int _sendDepth;
 
         private uint? _stubCache;
         private string _stubCacheKeychip;      // 上面那个缓存是按哪个 keychip 算出来的
@@ -223,13 +224,11 @@ namespace InStoreLink
         public void Stop()
         {
             _stopping = true;
+            _sendWake.Set();
             CloseSocket();
             foreach (int key in new List<int>(AcceptPending.Keys)) CancelAccept(key);
-            Thread send = _sendThread, recv = _recvThread;
             _sendThread = null;
             _recvThread = null;
-            if (send != null) { try { send.Abort(); } catch (Exception) { } }
-            if (recv != null) { try { recv.Abort(); } catch (Exception) { } }
             StatusCode = StatusIdle;
         }
 
@@ -295,27 +294,27 @@ namespace InStoreLink
 
         private void SendLoop()
         {
-            // 记下"我是哪条连接的发送线程"。Reconnect 会换一茬收发线程，本线程若发现
-            // _sendThread 已经不是自己，就说明这条连接作废了，必须立刻退休 —— 否则它会
-            // 继续抽干队列去喂一条已经关掉的连接（把新连接的报文也一起吃掉）。
             Thread me = Thread.CurrentThread;
             try
             {
                 while (!_stopping)
                 {
-                    Thread.Sleep(SendTickMs);
+                    // 有包就立刻醒；没包最多睡 1 个心跳周期。
+                    _sendWake.WaitOne(HeartbeatMs);
                     if (_stopping || !ReferenceEquals(_sendThread, me)) return;
                     if (_heartbeat.ElapsedMilliseconds > HeartbeatMs)
                     {
                         _heartbeat.Restart();
                         Send(new LinkMsg { Cmd = (int)LinkCmd.CtlHeartbeat });
-                        // Send 可能刚因积压把连接断开（_sendThread 被清空），那就退休。
                         if (!ReferenceEquals(_sendThread, me)) return;
                     }
                     LinkMsg msg;
                     while (!_stopping && ReferenceEquals(_sendThread, me)
                            && SendQ.TryDequeue(out msg))
+                    {
+                        Interlocked.Decrement(ref _sendDepth);
                         WriteLine(msg);
+                    }
                 }
             }
             catch (ThreadAbortException) { }
@@ -355,18 +354,11 @@ namespace InStoreLink
             {
                 LinkLog.Warn(why + "，重连中…");
                 CloseSocket();
-                Thread send = _sendThread, recv = _recvThread;
                 _sendThread = null;
                 _recvThread = null;
-                // ★ 别 Abort **当前线程**：Reconnect 就是从 SendLoop/RecvLoop 里调出来的，
-                //   而 Thread.Abort() 抛的 ThreadAbortException 即使被 catch 住，也会在
-                //   catch 末尾被运行时自动重抛 —— 于是这个线程当场死掉，下面那句
-                //   ConnectAsync() 根本执行不到，"断开后自动重连"整条路是死的
-                //   （表现：中继断一次之后客户端就再也不收发，日志里也没有重连记录）。
-                //   当前线程本来就该返回了（调用点在循环末尾），让它自然结束即可。
-                Thread self = Thread.CurrentThread;
-                if (send != null && send != self) { try { send.Abort(); } catch (Exception) { } }
-                if (recv != null && recv != self) { try { recv.Abort(); } catch (Exception) { } }
+                // 不 Thread.Abort：Mono 运行时里 Abort 可能把锁/状态留在半截。
+                // 关闭 socket + 清空线程引用 + 唤醒发送线程，旧线程会自己退出。
+                _sendWake.Set();
             }
             finally
             {
@@ -591,8 +583,10 @@ namespace InStoreLink
                 HandleIncoming(msg);
                 return;
             }
-            if (SendQ.Count >= SendQueueMaxDepth)
+            int depth = Interlocked.Increment(ref _sendDepth);
+            if (depth > SendQueueMaxDepth)
             {
+                Interlocked.Decrement(ref _sendDepth);
                 Interlocked.Increment(ref _sendDropped);
                 // 只判一次：这条连接一旦积压断开，后面每个包都重连一次会把日志刷爆，
                 // 也没意义（连接已经在重连路上了）。新连接建立后会复位这个标记。
@@ -605,6 +599,7 @@ namespace InStoreLink
                 return;
             }
             SendQ.Enqueue(msg);
+            _sendWake.Set();
         }
 
         private void WriteLine(LinkMsg msg)

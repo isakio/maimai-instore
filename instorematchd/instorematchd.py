@@ -1,53 +1,19 @@
 #!/usr/bin/env python3
 """
-instorematchd —— 兼容 WorldLink / NyanLink 客户端 mod 的自建联机服务端
+instorematchd —— 兼容 InStoreLink / WorldLink / NyanLink 的大厅 + 中继。
 
-参照 MuNET-OSS/NyanLink（worldlinkd 的 Kotlin 实现）重写，协议完全兼容：
-客户端 mod 不需要任何改动，只要 LobbyUrl 指向本服务即可。
+只依赖 Python 标准库：
+  HTTP :20100  /recruit/start /recruit/finish /recruit/list /info /online
+               /api/status /admin /debug /
+  TCP  :20101  一行一条消息，字段用逗号分隔
 
-只用 Python 标准库，零依赖。
-
-  HTTP 大厅 :20100   /recruit/start  /recruit/finish  /recruit/list  /info  /online
-                     /            （网页看板）
-                     /api/status  （看板用的 JSON）
-  TCP  中继 :20101   行协议，一条消息一行，字段用逗号分隔
-
-协议字段（0 起）：
-  0=固定 1   1=命令   2=协议(6=TCP/17=UDP)   3=流ID   4=源IP   5=源端口
-  6=目标IP   7=目标端口   8..15=预留   16+=数据(base64，或纯文本)
-命令：1=注册 3=心跳 4=建流 5=接流 7=关流 21=发数据 22=广播
-
-相比原版修掉的问题：
-  * 处理 CTL_TCP_CLOSE（原版直接忽略，流表只增不减）
-  * 房间 TTL、心跳超时可配置
-  * 客户端异常/半包不会拖垮整个服务
-  * 网页看板：实时看在线玩家和房间，不用再翻日志
-
-针对「异常流程」补的一轮（原版和第一版都没兜）：
-  * CTL_TCP_CONNECT 挂起超时：对端一直不 Accept 就回收，并回一条 CTL_TCP_CLOSE
-    给请求方，别让它干等（客户端那边没有超时，只能靠服务端说一声）
-  * 挂起流超上限只拒这一条，不再把整个连接踢掉
-  * 目标不在线 / 接流失败时，主动回 CTL_TCP_CLOSE 给发起方
-  * CTL_TCP_CLOSE 转发给对端（原来只清服务端自己的流表）
-  * 关房时把该房主名下所有挂起建流一并取消
-  * /recruit/start 校验 Keychip 与 IpAddress 一致、限速、限制房间总数
-
-边界/压力审计（第二轮）补的：
-  * 同一条连接换 keychip 重新注册时，旧身份从 STATE.clients 摘掉（否则单连接就能把表刷爆）
-  * /recruit/* 的嵌套字段类型不符（RecruitInfo/MechaInfo 非对象、Keychip 非字符串）回 4xx，
-    不再抛未捕获异常把连接掐断
-  * 大厅 HTTP：每连接读取超时 + 有界线程（防 slowloris 慢连接耗线程）
-  * 中继 send()：drain 带超时，对端只连不读时不再把发送方的协程无限期堵住
-  * CTL_TCP_ACCEPT 校验 pending.peer（别人不能替你接流）
-  * 掉线时通知被挂起的发起方；不属于任何已建流的 TCP DATA_SEND 丢弃
-  * 中继连接总数 / 每来源 IP 上限；UDP 广播每客户端限速（防 O(N) 放大）
+协议与上游逐字节兼容，客户端不需要因为本服务端改动而改协议。
 """
 
 from __future__ import annotations
 
 import argparse
 import asyncio
-import base64
 import hashlib
 import hmac
 import json
@@ -63,52 +29,41 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
 LOG = logging.getLogger("instorematchd")
-
-# /admin 和完整信息用的 token（由 --admin-token 或环境变量 IMD_ADMIN_TOKEN 传入；
-# 不要写进本仓库 —— 仓库是公开的）
 ADMIN_TOKEN = ""
 
-# ------------------------------------------------------------ 公开看板脱敏
-# 公开的看板 / /api/status 里，keychip 和 IP 一律打码（名字保留）；
-# 看全部信息要带 token 访问 /admin?token=…
 _KEYCHIP_RE = re.compile(r"\b[AW][0-9A-Za-z][0-9A-Za-z-]{5,}\b")
 _IP_RE = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
 
 
-def mask_keychip(keychip):
-    """W9999888877 -> W9999***877"""
-    if not keychip:
-        return keychip
-    s = str(keychip)
+def mask_keychip(value):
+    if not value:
+        return value
+    s = str(value)
     if len(s) <= 8:
         return s[:2] + "***"
     return s[:5] + "*" * (len(s) - 8) + s[-3:]
 
 
-def mask_ip(ip):
-    """203.0.113.10 -> 203.0.x.x"""
-    if not ip:
-        return ip
-    parts = str(ip).split(".")
+def mask_ip(value):
+    if not value:
+        return value
+    parts = str(value).split(".")
     if len(parts) == 4:
         return f"{parts[0]}.{parts[1]}.x.x"
-    return str(ip)[:4] + "***"
+    return str(value)[:4] + "***"
 
 
 def mask_text(text):
-    """把自由文本（事件流水）里出现的 keychip / IP 打码"""
     if not text:
         return text
 
-    def _kc(m):
-        v = m.group(0)
-        if sum(ch.isdigit() for ch in v) < 4:
-            return v                      # 数字太少，当普通单词，不动
-        return mask_keychip(v)
+    def repl(match):
+        value = match.group(0)
+        return mask_keychip(value) if sum(ch.isdigit() for ch in value) >= 4 else value
 
-    return _IP_RE.sub(lambda m: mask_ip(m.group(0)), _KEYCHIP_RE.sub(_kc, text))
+    return _IP_RE.sub(lambda m: mask_ip(m.group(0)), _KEYCHIP_RE.sub(repl, text))
 
-# ------------------------------------------------------------------ 协议常量
+
 CMD_START = 1
 CMD_HEARTBEAT = 3
 CMD_TCP_CONNECT = 4
@@ -120,54 +75,34 @@ CMD_BROADCAST = 22
 PROTO_TCP = 6
 PROTO_UDP = 17
 PROTO_VERSION = 1
-# 大厅接口的请求体上限。/recruit/start 的真实请求体 ~1 KB，64 KiB 已经非常宽松；
-# 不设上限的话，一句 `Content-Length: 999999999` 就会让 rfile.read() 去啃一个天文数字
-# （挂住一个线程 + 吃内存），而这是个**未鉴权**的公开接口。
-MAX_BODY_BYTES = 64 * 1024
-MAX_STREAMS = 10            # 单个客户端同时挂起的建流上限
-# 单个客户端同时**已建成**的流上限。以前只限制了"挂起"（MAX_STREAMS），已建成的流表
-# 没有任何上限 —— 一个未鉴权连接只要不停地 CONNECT+ACCEPT（dst 指向自己也行），
-# 每两条小消息就在服务端多留一条永久记录，能一路涨到把内存吃干。
-# 正常一局联机同时也就 1~2 条流，64 已经非常宽松。
-MAX_ESTABLISHED_STREAMS = 64
-PENDING_TIMEOUT = 10        # 建流请求多久没人接就回收（秒，可用 --pending-timeout 改）
-MAX_ROOMS = 200             # 大厅同时存在的房间上限（可用 --max-rooms 改）
-ROOM_RATE_WINDOW = 10.0     # 开房限速窗口（秒）
-# 中继一条消息（一行文本）允许的最大长度。asyncio 的 StreamReader 默认上限是 64 KiB，
-# 而 DATA_SEND 的 payload 是 base64（原包 4/3 大）—— 游戏一旦发一个 48 KiB 以上的包，
-# 整行就超限，asyncio 抛 LimitOverrunError → 那条连接被直接断开，玩家看到的是"打着打着
-# 两边都掉了"。放宽到 1 MiB（单条上限，不是总量），既够用又不至于被单连接吃爆内存。
-RELAY_LINE_LIMIT = 1024 * 1024
-# 每个来源 IP 在窗口内最多开几次房。放宽到 20 是有意的：实测本体只在"开始招募"
-# 那一下发 StartRecruit（5 分钟 6 次），但万一某个版本每帧/每秒重播，20/10s 也不会
-# 误伤；同时它仍然是"公开接口不能被刷"的底线。
-ROOM_RATE_MAX = 20
 
-# 中继连接总数、每来源 IP 的连接数上限（第二轮 S7）。没有上限时，一条来源就能把
-# STATE.clients / fd 吃干。默认放大度很大（正常一局联机每人 1 条连接），只挡"明显滥用"。
+MAX_BODY_BYTES = 64 * 1024
+MAX_STREAMS = 10
+MAX_ESTABLISHED_STREAMS = 64
+PENDING_TIMEOUT = 10
+MAX_ROOMS = 200
+ROOM_RATE_WINDOW = 10.0
+ROOM_RATE_MAX = 20
 MAX_CLIENTS = 2000
 MAX_CLIENTS_PER_IP = 256
-# 中继 send() 的 drain 超时（第二轮 S4）：对端只连不读时写缓冲会一直排不空，
-# 不设超时就会把"给这个对端发数据的人"的协程一起堵死。
+RELAY_LINE_LIMIT = 1024 * 1024
 SEND_DRAIN_TIMEOUT = 10
-# 大厅 HTTP（第二轮 S3）：ThreadingHTTPServer 每请求一线程，且以前 socket 没有 timeout。
-# 慢连接（slowloris / 半开 body）能把线程和 fd 耗干 —— 给个读取超时 + 线程上限。
 LOBBY_TIMEOUT = 15
 MAX_LOBBY_THREADS = 64
-# 每个客户端在一个窗口内最多发几次 UDP 广播（第二轮 S7）。广播是复制给所有在线客户端的，
-# 不限速就是一个 O(N) 放大器。
 BROADCAST_RATE_MAX = 10
 
 CMD_NAMES = {
-    CMD_START: "CTL_START", CMD_HEARTBEAT: "CTL_HEARTBEAT",
-    CMD_TCP_CONNECT: "CTL_TCP_CONNECT", CMD_TCP_ACCEPT: "CTL_TCP_ACCEPT",
-    CMD_TCP_CLOSE: "CTL_TCP_CLOSE", CMD_SEND: "DATA_SEND",
+    CMD_START: "CTL_START",
+    CMD_HEARTBEAT: "CTL_HEARTBEAT",
+    CMD_TCP_CONNECT: "CTL_TCP_CONNECT",
+    CMD_TCP_ACCEPT: "CTL_TCP_ACCEPT",
+    CMD_TCP_CLOSE: "CTL_TCP_CLOSE",
+    CMD_SEND: "DATA_SEND",
     CMD_BROADCAST: "DATA_BROADCAST",
 }
 
 
 def keychip_to_stub(keychip: str) -> int:
-    """和客户端 mod 完全一致的伪 IP 算法：keychip 的 md5 前 4 字节当大端 uint32"""
     d = hashlib.md5(keychip.encode("utf-8")).digest()
     return (d[0] << 24) | (d[1] << 16) | (d[2] << 8) | d[3]
 
@@ -177,31 +112,16 @@ def stub_to_ip(stub: int) -> str:
 
 
 def as_stub(value):
-    """把请求里的 IpAddress 收成整数；不是整数就返回 None（调用方回 400）。
-
-    为什么不能直接 `int(stub)`：这是**未鉴权**接口，`"IpAddress": "abc"` / `[]` / `{}`
-    都能让 int() 抛 ValueError/TypeError —— 处理函数里抛出去就是这条连接被掐断
-    （客户端看到 RemoteDisconnected）加日志里一条 traceback。bool 也要挡掉
-    （JSON 的 true 会被 int() 收成 1，那是"合法整数"但显然不是地址）。
-    """
     if isinstance(value, bool) or not isinstance(value, int):
         return None
     return value
 
 
 def as_dict(value) -> dict:
-    """把请求里的嵌套字段收成 dict；不是 dict（字符串/列表/数字…）就返回空 dict。
-
-    第二轮 S2：`/recruit/*` 里以前是 `(data or {}).get("RecruitInfo") or {}`，只要
-    `RecruitInfo` 是个**非空**的非对象（`"hello"` / `["x"]`），后面 `.get()` 就抛
-    AttributeError —— 在 HTTP 处理函数里抛出去 = 这条连接被掐断 + 日志里一条 traceback。
-    这是未鉴权公开接口，一个请求就能触发。统一走这个函数，各 handler 再按"缺字段"处理。
-    """
     return value if isinstance(value, dict) else {}
 
 
 def first_name(mecha) -> "str | None":
-    """安全取 MechaInfo.UserNames 的第一个名字（该字段类型不可信：可能是 int/str）。"""
     names = mecha.get("UserNames") if isinstance(mecha, dict) else None
     if isinstance(names, list) and names:
         return names[0]
@@ -209,24 +129,21 @@ def first_name(mecha) -> "str | None":
 
 
 def first_of(value):
-    """安全取列表首项（FumenDifs 之类的字段类型不可信）。"""
     return value[0] if isinstance(value, list) and value else None
 
 
 def rec_parts(rec: dict):
-    """从已存的招募记录里安全取 (RecruitInfo, MechaInfo)，两个都保证是 dict。"""
     info = as_dict(rec.get("RecruitInfo"))
     return info, as_dict(info.get("MechaInfo"))
 
 
 def parse_msg(line: str) -> dict:
-    """把一行协议文本解析成字典，字段缺失一律当 None"""
     f = line.split(",")
 
-    def num(i, cast=int):
-        if i < len(f) and f[i] != "":
+    def num(index, cast=int):
+        if index < len(f) and f[index] != "":
             try:
-                return cast(f[i])
+                return cast(f[index])
             except ValueError:
                 return None
         return None
@@ -245,7 +162,6 @@ def parse_msg(line: str) -> dict:
 
 def build_msg(cmd, proto=None, sid=None, src=None, sport=None, dst=None, dport=None,
               data=None) -> str:
-    """和客户端 Msg.ToString() 一致的序列化：17 个字段，尾部空字段裁掉"""
     arr = [1, cmd, proto, sid, src, sport, dst, dport,
            None, None, None, None, None, None, None, None, data]
     return ",".join("" if x is None else str(x) for x in arr).rstrip(",")
@@ -256,95 +172,66 @@ def ctl(cmd, data=None) -> str:
 
 
 def close_msg(proto, sid, src_stub, src_port, dst_stub, dst_port, reason=None) -> str:
-    """
-    发给某一方的「这条流没了」。
-
-    字段要站在**收件人**的角度填：dst 是收件人、dport 是收件人自己的端口 ——
-    客户端是按 `sid + 自己的端口` 找回那条流 / 那次建流的（和它内部队列的 key 一致）。
-
-    reason 会放进 data 字段：客户端会把它打进日志。以前只说"这条流没了"，
-    排查时根本分不出是"目标不在线"还是"挂起超了上限"（真踩过）。
-    """
+    # 收件人视角：dst 是收件人，dport 是收件人自己的端口。
     return build_msg(CMD_TCP_CLOSE, proto=proto, sid=sid,
-                     src=src_stub, sport=src_port, dst=dst_stub, dport=dst_port,
-                     data=reason)
+                     src=src_stub, sport=src_port,
+                     dst=dst_stub, dport=dst_port, data=reason)
 
 
-# ------------------------------------------------------------------ 共享状态
 class State:
-    """中继和大厅共享：在线客户端、房间列表、事件记录"""
-
     def __init__(self, recruit_ttl: int):
         self.lock = threading.Lock()
-        self.clients: dict[int, "RelayClient"] = {}      # stub -> client
-        self.recruits: dict[int, dict] = {}              # stub -> {rec, keychip, ts}
-        self.room_posts: dict[str, deque] = {}           # 来源IP -> 开房时间戳（限速用）
-        self.events: deque = deque(maxlen=200)
+        self.clients: dict[int, RelayClient] = {}
+        self.recruits: dict[int, dict] = {}
+        self.room_posts: dict[str, deque] = {}
+        self.events = deque(maxlen=200)
         self.started_at = time.time()
         self.recruit_ttl = recruit_ttl
         self.stats = {"registered": 0, "sends": 0, "broadcasts": 0, "connects": 0}
 
     def log_event(self, kind: str, text: str):
-        entry = {"ts": time.time(), "kind": kind, "text": text}
         with self.lock:
-            self.events.appendleft(entry)
+            self.events.appendleft({"ts": time.time(), "kind": kind, "text": text})
         LOG.info("[%s] %s", kind, text)
 
-    def prune_recruits(self):
+    def prune_rooms(self):
         now = time.time()
         with self.lock:
-            gone = [k for k, v in self.recruits.items()
-                    if now - v["ts"] > self.recruit_ttl]
-            for k in gone:
-                self.recruits.pop(k, None)
-            # 房主已经不在中继上的房间直接撤掉。房间是靠 HTTP 挂着续命的，房主掉线之后
-            # 那间房还能被看到，但**谁点进去都只会得到"目标不在线"** —— 玩家看到的是
-            # "列表里有房间、一按 NEXT 就秒退"，会以为 mod 坏了（真踩过：一个只发 HTTP、
-            # 不上中继的测试房主，把整轮真机复测都绕进去了）。
-            # 客户端每 10 秒会重报一次，所以房主重连之后房间很快就会回来。
-            orphan = [k for k, v in self.recruits.items()
-                      if v.get("keychip") and keychip_to_stub(v["keychip"]) not in self.clients]
-            for k in orphan:
-                self.recruits.pop(k, None)
-            # 开房限速表也顺手清一下：只留这个时间窗口里还有记录的来源，
-            # 不然一个公开接口攒久了就是一张无限增长的 IP 表。
-            stale = [s for s, q in self.room_posts.items()
-                     if not q or now - q[-1] > ROOM_RATE_WINDOW]
-            for s in stale:
-                self.room_posts.pop(s, None)
+            for stub, rec in list(self.recruits.items()):
+                if now - rec["ts"] > self.recruit_ttl:
+                    self.recruits.pop(stub, None)
+            for stub, rec in list(self.recruits.items()):
+                keychip = rec.get("keychip")
+                if keychip and keychip_to_stub(keychip) not in self.clients:
+                    self.recruits.pop(stub, None)
+            for src, posts in list(self.room_posts.items()):
+                if not posts or now - posts[-1] > ROOM_RATE_WINDOW:
+                    self.room_posts.pop(src, None)
 
     def snapshot(self, mask: bool = False) -> dict:
-        self.prune_recruits()
+        self.prune_rooms()
         with self.lock:
-            clients = [
-                {
-                    "keychip": c.keychip,
-                    "stub": stub_to_ip(c.stub) if c.stub else None,
-                    "peer": c.peer_ip,
-                    "connected": round(time.time() - c.connected_at),
-                    "idle": round(time.time() - c.last_heartbeat, 1),
-                    "streams": len(c.streams),
-                }
-                for c in self.clients.values()
-            ]
-            recruits = [
-                {
-                    # snapshot() 是 /online 和看板共用的：字段缺失/空列表/类型不符
-                    # （UserNames: [] / FumenDifs: 5 …）以前会 IndexError/TypeError 把 /online
-                    # 打成 500。统一走 first_name / first_of 安全取值。
-                    "host": first_name(rec_parts(r["rec"])[1]),
-                    "music_id": rec_parts(r["rec"])[0].get("MusicID")
-                                or rec_parts(r["rec"])[1].get("MusicID"),
-                    "difficulty": first_of(rec_parts(r["rec"])[1].get("FumenDifs")),
-                    "age": round(time.time() - r["ts"], 1),
-                    "stub": stub_to_ip(k),
-                }
-                for k, r in self.recruits.items()
-            ]
+            clients = [{
+                "keychip": c.keychip,
+                "stub": stub_to_ip(c.stub) if c.stub else None,
+                "peer": c.peer_ip,
+                "connected": round(time.time() - c.connected_at),
+                "idle": round(time.time() - c.last_heartbeat, 1),
+                "streams": len(c.streams),
+            } for c in self.clients.values()]
+            recruits = []
+            for stub, rec in self.recruits.items():
+                info, mecha = rec_parts(rec["rec"])
+                recruits.append({
+                    "host": first_name(mecha),
+                    "music_id": info.get("MusicID") or mecha.get("MusicID"),
+                    "difficulty": first_of(mecha.get("FumenDifs")),
+                    "age": round(time.time() - rec["ts"], 1),
+                    "stub": stub_to_ip(stub),
+                })
             events = list(self.events)[:40]
             stats = dict(self.stats)
 
-        # 公开视图：keychip / IP 打码（名字保留）；/admin?token=… 看原始值
         if mask:
             for c in clients:
                 c["keychip"] = mask_keychip(c["keychip"])
@@ -352,8 +239,8 @@ class State:
                 c["peer"] = mask_ip(c["peer"])
             for r in recruits:
                 r["stub"] = mask_ip(r["stub"])
-            events = [{"ts": e["ts"], "kind": e["kind"], "text": mask_text(e["text"])}
-                      for e in events]
+            events = [{"ts": e["ts"], "kind": e["kind"],
+                       "text": mask_text(e["text"])} for e in events]
 
         return {
             "uptime": round(time.time() - self.started_at),
@@ -373,7 +260,6 @@ class State:
 STATE: State | None = None
 
 
-# ------------------------------------------------------------------ TCP 中继
 class RelayClient:
     def __init__(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter,
                  peer_ip: str):
@@ -382,16 +268,14 @@ class RelayClient:
         self.peer_ip = peer_ip
         self.keychip: str | None = None
         self.stub: int | None = None
-        self.streams: dict[int, int] = {}      # 流ID -> 对端 stub
-        # 流ID -> {"peer": 目标 stub, "proto", "sport", "dport", "ts"}
-        # 用 dict 而不是 set：要能按时间回收（以前只增不减，涨到 10 条就把人踢下线）
+        self.streams: dict[int, int] = {}
         self.pending: dict[int, dict] = {}
         self.last_heartbeat = time.time()
         self.connected_at = time.time()
-        self.unregistered = 0        # 收到多少条"还没注册就发过来的"消息（用来限流告警）
-        self.oversize = 0            # 收到多少条"单行超过 RELAY_LINE_LIMIT"的坏行（用来限流告警）
-        self.broadcast_times: deque = deque()   # 最近几次 UDP 广播的时间戳（S7 限速）
-        self.broadcast_dropped = 0               # 被限速丢掉的广播数（限流告警用）
+        self.unregistered = 0
+        self.oversize = 0
+        self.broadcast_times = deque()
+        self.broadcast_dropped = 0
         self._lock = asyncio.Lock()
         self.closed = False
 
@@ -401,16 +285,9 @@ class RelayClient:
         async with self._lock:
             try:
                 self.writer.write((line + "\n").encode("utf-8"))
-                # S4：对端只连不读时写缓冲会一直排不空，drain() 没有超时就会把调用方
-                # （往往是"给这个对端发数据的那个人"）的协程无限期堵住。超时就判定对端卡死，
-                # 断开它，让发送方拿到"发送失败/对端离线"而不是永远卡在那里。
                 await asyncio.wait_for(self.writer.drain(), timeout=SEND_DRAIN_TIMEOUT)
             except asyncio.TimeoutError:
-                LOG.warning("发送缓冲 %ds 排不空，判定对端卡死，断开（%s）",
-                            SEND_DRAIN_TIMEOUT, self.keychip or self.peer_ip)
-                # 注意要 **abort** 而不是优雅 close()：close() 会先把积压的写缓冲 flush 掉，
-                # 而 flush 的目标正是这个"不读"的对端 —— FIN 永远发不出去，连接会一直挂着。
-                # abort() 直接丢弃缓冲、立刻断开。
+                LOG.warning("发送缓冲排不空，断开 %s", self.keychip or self.peer_ip)
                 transport = getattr(self.writer, "transport", None)
                 if transport is not None:
                     try:
@@ -418,8 +295,7 @@ class RelayClient:
                     except Exception:
                         pass
                 await self.close()
-            except Exception as exc:
-                LOG.debug("发送失败 %s: %s", self.peer_ip, exc)
+            except Exception:
                 await self.close()
 
     async def close(self):
@@ -431,48 +307,31 @@ class RelayClient:
         except Exception:
             pass
 
-    async def register(self, keychip: str):
-        if not keychip:
-            # **不要抛异常**：这是"客户端发错了"，而且公开端口上随手就能触发 ——
-            # 抛出去会被 on_client 的兜底 LOG.exception 打成一条 ERROR + 完整 traceback，
-            # 谁都能拿来刷日志。这里返回 False，让调用方把这条连接关掉。
-            LOG.warning("注册消息没有 keychip（来源 %s），这条连接不予注册", self.peer_ip)
+    async def register(self, keychip: str) -> bool:
+        if not keychip or STATE is None:
             return False
         stub = keychip_to_stub(keychip)
-        if STATE is None:
-            raise RuntimeError("服务未初始化")
         with STATE.lock:
             old = STATE.clients.get(stub)
             if old is not None and old is not self:
-                LOG.info("同一身份重新登录，踢掉旧连接: %s", keychip)
                 asyncio.create_task(old.close())
-            # S1：同一条连接换过 keychip 再注册时，把**上一个身份**从表里摘掉。以前只写
-            # 新 key、旧 key 永远留着 —— 一条连接反复换身份就能把 STATE.clients 刷爆，
-            # 而且断开只 pop 最后一个 key，泄漏是持久的。
-            if (self.stub is not None and self.stub != stub
-                    and STATE.clients.get(self.stub) is self):
-                STATE.clients.pop(self.stub, None)
-            # S7：连接总数 / 每来源 IP 上限（只在"新增一个身份"时算）。
+            if self.stub is not None and self.stub != stub:
+                if STATE.clients.get(self.stub) is self:
+                    STATE.clients.pop(self.stub, None)
             if old is None:
                 same_ip = sum(1 for c in STATE.clients.values()
                               if c is not self and c.peer_ip == self.peer_ip)
-                if len(STATE.clients) >= MAX_CLIENTS:
-                    LOG.warning("中继在线数已达上限 %d，拒绝注册（来源 %s）",
-                                MAX_CLIENTS, self.peer_ip)
-                    return False
-                if same_ip >= MAX_CLIENTS_PER_IP:
-                    LOG.warning("来源 %s 的连接数已达上限 %d，拒绝注册",
-                                self.peer_ip, MAX_CLIENTS_PER_IP)
+                if len(STATE.clients) >= MAX_CLIENTS or same_ip >= MAX_CLIENTS_PER_IP:
                     return False
             self.keychip = keychip
             self.stub = stub
             STATE.clients[stub] = self
             STATE.stats["registered"] += 1
-        STATE.log_event("注册", f"{keychip} 来自 {self.peer_ip} → 伪IP {stub_to_ip(stub)}")
+        STATE.log_event("注册", f"{keychip} 来自 {self.peer_ip} → {stub_to_ip(stub)}")
         await self.send(ctl(CMD_START, data=f"version={PROTO_VERSION}"))
         return True
 
-    def find_target(self, msg: dict) -> "RelayClient | None":
+    def find_target(self, msg: dict):
         stub = None
         if msg["sid"] is not None:
             stub = self.streams.get(msg["sid"])
@@ -492,186 +351,125 @@ class RelayClient:
 
         if cmd == CMD_BROADCAST:
             if msg["proto"] != PROTO_UDP:
-                LOG.debug("收到非 UDP 的广播，忽略")
                 return
-            # S7：广播是**复制给所有在线客户端**的，不限速就是 O(N) 放大器。给每个客户端
-            # 一个窗口内的配额，超了就丢（正常客户端根本不发广播，只有异常/恶意源会刷）。
             now = time.time()
             while self.broadcast_times and now - self.broadcast_times[0] > ROOM_RATE_WINDOW:
                 self.broadcast_times.popleft()
             if len(self.broadcast_times) >= BROADCAST_RATE_MAX:
                 self.broadcast_dropped += 1
-                if self.broadcast_dropped <= 3:
-                    LOG.warning("广播过于频繁（%d/%ds），已丢弃（%s）",
-                                BROADCAST_RATE_MAX, int(ROOM_RATE_WINDOW),
-                                self.keychip or self.peer_ip)
                 return
             self.broadcast_times.append(now)
             with STATE.lock:
                 targets = list(STATE.clients.values())
                 STATE.stats["broadcasts"] += 1
-            for c in targets:
-                await c.send(build_msg(CMD_BROADCAST, proto=msg["proto"],
-                                       sid=msg["sid"], src=self.stub, sport=msg["sport"],
-                                       dst=msg["dst"], dport=msg["dport"], data=msg["data"]))
+            for target in targets:
+                await target.send(build_msg(
+                    CMD_BROADCAST, proto=msg["proto"], sid=msg["sid"],
+                    src=self.stub, sport=msg["sport"], dst=msg["dst"],
+                    dport=msg["dport"], data=msg["data"]))
+            return
+
+        if cmd == CMD_TCP_CLOSE:
+            await self.handle_close(msg)
             return
 
         target = self.find_target(msg)
-        # 关流必须在 find_target 之前处理：对端已经离线时 find_target 会返回 None，
-        # 走下面那条"目标不在线"就 return 了 —— 结果**本端的流表 / 挂起表都不清**，
-        # 只会越攒越多（sid 还占着，将来撞上就是"流ID 重复使用"）。反正关流本来
-        # 就不需要目标在线：能通知就通知，通知不到也要把自己这边擦干净。
-        if cmd == CMD_TCP_CLOSE:
-            await self._handle_close(msg)
-            return
-
         if target is None:
-            LOG.warning("命令 %s 的目标不在线（dst=%s sid=%s）",
-                        CMD_NAMES.get(cmd, cmd),
-                        stub_to_ip(msg["dst"]) if msg["dst"] else "-", msg["sid"])
-            # 目标不在线时，让发起方**立刻**知道自己白等了。
-            # 以前这里只写一条 warning 就完了：房客那边收不到任何回应，而客户端
-            # 发起建流之后是没有超时的 —— 表现就是"点了加入，然后永远卡在连接中"。
-            if (cmd in (CMD_TCP_CONNECT, CMD_TCP_ACCEPT, CMD_SEND)
-                    and msg["sid"] is not None and msg["dst"] is not None):
-                await self.send(close_msg(msg["proto"], msg["sid"],
-                                          msg["dst"], msg["dport"],
-                                          self.stub, msg["sport"],
-                                          reason="目标不在线"))
+            if cmd in (CMD_TCP_CONNECT, CMD_TCP_ACCEPT, CMD_SEND):
+                if msg["sid"] is not None and msg["dst"] is not None:
+                    await self.send(close_msg(
+                        msg["proto"], msg["sid"], msg["dst"], msg["dport"],
+                        self.stub, msg["sport"], reason="目标不在线"))
             return
 
         if cmd == CMD_SEND:
-            # S6：TCP 数据必须挂在一条**已建成的流**上。以前 find_target 在流表里找不到
-            # 这个 sid 时会回退到 msg["dst"]，于是任何人都能用任意 sid 往别人的 dst 灌数据。
-            # （UDP 的 sid 本来就是空的 —— 直连 UDP 按 dst 路由，不受这条限制。）
             if (msg["proto"] == PROTO_TCP and msg["sid"] is not None
                     and msg["sid"] not in self.streams):
-                LOG.warning("DATA_SEND 的 sid=%s 不属于任何已建流，丢弃（%s）",
-                            msg["sid"], self.keychip or self.peer_ip)
                 return
             with STATE.lock:
                 STATE.stats["sends"] += 1
-            await target.send(build_msg(CMD_SEND, proto=msg["proto"], sid=msg["sid"],
-                                        src=self.stub, sport=msg["sport"],
-                                        dst=target.stub, dport=msg["dport"], data=msg["data"]))
+            await target.send(build_msg(
+                CMD_SEND, proto=msg["proto"], sid=msg["sid"],
+                src=self.stub, sport=msg["sport"], dst=target.stub,
+                dport=msg["dport"], data=msg["data"]))
+            return
 
-        elif cmd == CMD_TCP_CONNECT:
+        if cmd == CMD_TCP_CONNECT:
             sid = msg["sid"]
-            if sid is None:
-                return
-            if sid in self.streams or sid in self.pending:
-                LOG.warning("流ID 重复使用: %s", sid)
+            if sid is None or sid in self.streams or sid in self.pending:
                 return
             if len(self.pending) >= MAX_STREAMS:
-                # 以前这里是直接把客户端踢下线 —— 结果玩家只是"点了几个进不去的房间"
-                # 就被断开重连。挂起流本来就有超时（见 pending_sweeper），超限只需要
-                # 拒掉这一条新的，没必要连坐整条连接。
-                LOG.warning("挂起流过多（%d），拒绝新流 %s（%s）",
-                            len(self.pending), sid, self.keychip)
-                await self.send(close_msg(msg["proto"], sid,
-                                          target.stub, msg["dport"],
-                                          self.stub, msg["sport"],
-                                          reason="服务端挂起已满，稍后再试"))
+                await self.send(close_msg(
+                    msg["proto"], sid, target.stub, msg["dport"],
+                    self.stub, msg["sport"], reason="服务端挂起已满，稍后再试"))
                 return
-            self.pending[sid] = {"peer": target.stub, "proto": msg["proto"],
-                                 "sport": msg["sport"], "dport": msg["dport"],
-                                 "ts": time.time()}
+            self.pending[sid] = {
+                "peer": target.stub, "proto": msg["proto"],
+                "sport": msg["sport"], "dport": msg["dport"], "ts": time.time(),
+            }
             with STATE.lock:
                 STATE.stats["connects"] += 1
-            await target.send(build_msg(CMD_TCP_CONNECT, proto=msg["proto"], sid=sid,
-                                        src=self.stub, sport=msg["sport"],
-                                        dst=target.stub, dport=msg["dport"]))
+            await target.send(build_msg(
+                CMD_TCP_CONNECT, proto=msg["proto"], sid=sid,
+                src=self.stub, sport=msg["sport"], dst=target.stub,
+                dport=msg["dport"]))
+            return
 
-        elif cmd == CMD_TCP_ACCEPT:
+        if cmd == CMD_TCP_ACCEPT:
             sid = msg["sid"]
             if sid is None or sid not in target.pending:
-                # 目标那边已经超时回收了（多半是房主开打了 / 房客自己退了）。
-                # 告诉接流方一声，别让它攥着一条服务端并不认的流。
-                LOG.warning("接流失败：目标没有挂起该流 %s（多半已超时回收）", sid)
                 if sid is not None:
-                    await self.send(close_msg(msg["proto"], sid,
-                                              target.stub, msg["dport"],
-                                              self.stub, msg["sport"],
-                                              reason="这条挂起已经回收了"))
+                    await self.send(close_msg(
+                        msg["proto"], sid, target.stub, msg["dport"],
+                        self.stub, msg["sport"], reason="这条挂起已经回收了"))
                 return
-            # S5：只能接**自己的**挂起流 —— pending[sid]["peer"] 才是这条流本该的对端。
-            # 不校验的话，任何已注册连接都能冒充房主把别人的挂起流接走（发起方会收到
-            # 一个"房主"发的 ACCEPT，其实房主根本没接）。
             if target.pending[sid].get("peer") != self.stub:
-                LOG.warning("接流被拒：sid=%s 的挂起对端是 %s，不是 %s",
-                            sid, stub_to_ip(target.pending[sid].get("peer") or 0),
-                            self.keychip or self.peer_ip)
-                await self.send(close_msg(msg["proto"], sid,
-                                          target.stub, msg["dport"],
-                                          self.stub, msg["sport"],
-                                          reason="这条挂起不是你的"))
+                await self.send(close_msg(
+                    msg["proto"], sid, target.stub, msg["dport"],
+                    self.stub, msg["sport"], reason="这条挂起不是你的"))
                 return
             target.pending.pop(sid, None)
-            # 已经建成的流也要有上限：两边谁的流表满了，这条就拒掉（回 CLOSE），
-            # 否则一张表能被刷到无限大（见 MAX_ESTABLISHED_STREAMS 的注释）。
             if (len(target.streams) >= MAX_ESTABLISHED_STREAMS
                     or len(self.streams) >= MAX_ESTABLISHED_STREAMS):
-                LOG.warning("建流数已达上限（%d），拒绝 sid=%s（%s ↔ %s）",
-                            MAX_ESTABLISHED_STREAMS, sid, self.keychip, target.keychip)
                 reason = "这个客户端的流数已达上限"
-                await self.send(close_msg(msg["proto"], sid,
-                                          target.stub, msg["dport"],
-                                          self.stub, msg["sport"], reason=reason))
+                await self.send(close_msg(
+                    msg["proto"], sid, target.stub, msg["dport"],
+                    self.stub, msg["sport"], reason=reason))
                 if target is not self:
-                    await target.send(close_msg(msg["proto"], sid,
-                                                self.stub, msg["sport"],
-                                                target.stub, msg["dport"], reason=reason))
+                    await target.send(close_msg(
+                        msg["proto"], sid, self.stub, msg["sport"],
+                        target.stub, msg["dport"], reason=reason))
                 return
             target.streams[sid] = self.stub
             self.streams[sid] = target.stub
-            await target.send(build_msg(CMD_TCP_ACCEPT, proto=msg["proto"], sid=sid,
-                                        src=self.stub, sport=msg["sport"],
-                                        dst=target.stub, dport=msg["dport"]))
+            await target.send(build_msg(
+                CMD_TCP_ACCEPT, proto=msg["proto"], sid=sid,
+                src=self.stub, sport=msg["sport"], dst=target.stub,
+                dport=msg["dport"]))
 
-        else:
-            LOG.debug("未处理的命令: %s", cmd)
-
-    async def _handle_close(self, msg: dict):
-        """处理 CTL_TCP_CLOSE：先擦干净自己这边的两张表，再尽力通知对端。
-
-        ← 原版这里直接忽略，导致流表只增不减（涨到上限就踢人）。
-        """
+    async def handle_close(self, msg: dict):
         sid = msg["sid"]
         peer = None
         if sid is not None:
             peer_stub = self.streams.pop(sid, None)
             info = self.pending.pop(sid, None)
             if peer_stub is None and info is not None:
-                peer_stub = info.get("peer")        # 还没 Accept 就取消了
-            if peer_stub is not None:
+                peer_stub = info.get("peer")
+            if peer_stub is not None and STATE is not None:
                 with STATE.lock:
                     peer = STATE.clients.get(peer_stub)
                 if peer is not None:
                     peer.streams.pop(sid, None)
                     peer.pending.pop(sid, None)
-        LOG.debug("关流 %s（对端 %s）", sid, peer.keychip if peer else "已离线")
-        # 转发给对端：以前只清服务端的两张流表就走了，两边的游戏都不知道
-        # 这条流已经没了，会一直攥着它继续发数据。
         if peer is not None and peer is not self:
-            await peer.send(close_msg(msg["proto"], sid,
-                                      self.stub, msg["sport"],
-                                      peer.stub, msg["dport"],
-                                      reason=msg["data"] or "对端关闭了流"))
+            await peer.send(close_msg(
+                msg["proto"], sid, self.stub, msg["sport"],
+                peer.stub, msg["dport"], reason=msg["data"] or "对端关闭了流"))
 
 
-async def pending_sweeper(interval: float = 1.0):
-    """
-    定期回收"没人接"的建流请求。
-
-    原版和第一版都是发出 CTL_TCP_CONNECT 之后就撒手不管：只要对端不 Accept，
-    这条挂起记录就永远留着。房客反复点"加入"、或者点进一个已经开打的房间，
-    pending 只会涨，涨到 MAX_STREAMS 就被服务端踢下线（玩家看到的是莫名其妙的掉线）。
-
-    回收时给两边都发一条 CTL_TCP_CLOSE：房客那边据此放弃这次连接，
-    房主那边据此把排队等 Accept 的请求丢掉。
-    """
+async def pending_sweeper():
     while True:
-        await asyncio.sleep(interval)
+        await asyncio.sleep(1.0)
         if STATE is None:
             continue
         now = time.time()
@@ -679,27 +477,23 @@ async def pending_sweeper(interval: float = 1.0):
             clients = list(STATE.clients.values())
         for client in clients:
             for sid, info in list(client.pending.items()):
-                waited = now - info["ts"]
-                if waited <= PENDING_TIMEOUT:
+                if now - info["ts"] <= PENDING_TIMEOUT:
                     continue
                 client.pending.pop(sid, None)
-                LOG.info("建流请求 %.0fs 没人接，回收 sid=%s（%s → %s）",
-                         waited, sid, client.keychip, stub_to_ip(info["peer"]))
-                await client.send(close_msg(info["proto"], sid,
-                                            info["peer"], info["dport"],
-                                            client.stub, info["sport"],
-                                            reason="对方一直没接流，已回收"))
-                peer = STATE.clients.get(info["peer"])
+                await client.send(close_msg(
+                    info["proto"], sid, info["peer"], info["dport"],
+                    client.stub, info["sport"],
+                    reason="对方一直没接流，已回收"))
+                with STATE.lock:
+                    peer = STATE.clients.get(info["peer"])
                 if peer is not None:
                     peer.pending.pop(sid, None)
-                    await peer.send(close_msg(info["proto"], sid,
-                                              client.stub, info["sport"],
-                                              peer.stub, info["dport"],
-                                              reason="对方放弃了这条建流"))
+                    await peer.send(close_msg(
+                        info["proto"], sid, client.stub, info["sport"],
+                        peer.stub, info["dport"], reason="对方放弃了这条建流"))
 
 
 async def cancel_pending_to(stub: int, reason: str):
-    """房间关了（或房主下线）时，把所有指向它的挂起建流请求一并取消。"""
     if STATE is None:
         return
     with STATE.lock:
@@ -709,33 +503,46 @@ async def cancel_pending_to(stub: int, reason: str):
             if info.get("peer") != stub:
                 continue
             client.pending.pop(sid, None)
-            LOG.info("房间没了，取消挂起建流 sid=%s（%s）", sid, reason)
-            await client.send(close_msg(info["proto"], sid,
-                                        stub, info["dport"],
-                                        client.stub, info["sport"],
-                                        reason=reason))
+            await client.send(close_msg(
+                info["proto"], sid, stub, info["dport"],
+                client.stub, info["sport"], reason=reason))
 
 
 async def relay_serve(host: str, port: int, heartbeat_timeout: int,
                       stop: "asyncio.Event | None" = None):
+    async def cleanup(client: RelayClient):
+        if client.stub is None or STATE is None:
+            return
+        with STATE.lock:
+            others = [c for c in STATE.clients.values() if c is not client]
+        orphan_pending = []
+        for other in others:
+            for sid in [s for s, peer in other.streams.items() if peer == client.stub]:
+                other.streams.pop(sid, None)
+            for sid, info in list(other.pending.items()):
+                if info.get("peer") == client.stub:
+                    other.pending.pop(sid, None)
+                    orphan_pending.append((other, sid, info))
+        for other, sid, info in orphan_pending:
+            await other.send(close_msg(
+                info["proto"], sid, client.stub, info["dport"],
+                other.stub, info["sport"], reason="对方已离线"))
+        with STATE.lock:
+            if STATE.clients.get(client.stub) is client:
+                STATE.clients.pop(client.stub, None)
+        STATE.log_event("断开", f"{client.keychip or client.peer_ip} 离线")
+
     async def on_client(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
         peer = writer.get_extra_info("peername") or ("?", 0)
         client = RelayClient(reader, writer, peer[0])
         try:
             while True:
                 try:
-                    raw = await asyncio.wait_for(reader.readline(), timeout=heartbeat_timeout)
+                    raw = await asyncio.wait_for(
+                        reader.readline(), timeout=heartbeat_timeout)
                 except asyncio.TimeoutError:
-                    STATE.log_event("断开", f"{client.keychip or peer[0]} 心跳超时")
                     break
                 except ValueError:
-                    # 单行超过 limit（见 RELAY_LINE_LIMIT）时 readline() 抛 ValueError ——
-                    # asyncio 内部是 LimitOverrunError，readline 把它转成 ValueError，
-                    # 并且已经把那段超长缓冲消费/清空（连接状态是干净的）。以前这里没接，
-                    # 会掉到最外层 except → break → 整条连接被踢：公开端口上任何人发一条
-                    # >1 MiB 的无换行数据，就能把自己的连接搞断；合法客户端真发大包也会被误伤。
-                    # 一条坏行不该拖垮整条连接：记一笔、跳过这一行、接着读下一条。
-                    # 计数限流（照 unregistered 的做法），免得有人拿超长行刷日志。
                     client.oversize += 1
                     if client.oversize <= 3:
                         LOG.warning("单行超过 %d 字节，已跳过（来源 %s）",
@@ -746,69 +553,32 @@ async def relay_serve(host: str, port: int, heartbeat_timeout: int,
                 line = raw.decode("utf-8", "replace").strip()
                 if not line:
                     continue
-                if line != "1,3":
-                    LOG.debug("<< %s %s", client.keychip or peer[0], line[:160])
                 try:
                     msg = parse_msg(line)
-                except Exception as exc:
-                    LOG.warning("消息解析失败: %s", exc)
+                except Exception:
                     continue
                 if msg["cmd"] is None:
                     continue
                 try:
                     if msg["cmd"] == CMD_START:
-                        # 注册不成功（没 keychip）就把连接关掉：留着它只会让后面每条
-                        # 消息都打一句"未注册就发消息"的警告刷屏。
                         if not await client.register(msg["data"] or ""):
                             break
                     elif client.stub is None:
-                        # 限流：以前是"每收到一条就打一条 warning"，一个从不注册的连接
-                        # （公开端口上随手可发）就能把日志刷爆、把真事件淹掉。
-                        # 前 3 条照打（方便排查），第 4 条直接断开这条连接。
                         client.unregistered += 1
                         if client.unregistered <= 3:
-                            LOG.warning("未注册就发消息，忽略: %s", line[:80])
+                            LOG.warning("未注册就发消息，忽略（来源 %s）", peer[0])
                         else:
-                            LOG.warning("这条连接发了 %d 条消息都没注册，断开（来源 %s）",
-                                        client.unregistered, peer[0])
                             break
                     else:
                         await client.handle(msg)
-                except Exception as exc:
-                    LOG.exception("处理消息出错: %s", exc)
-        except Exception as exc:
-            LOG.debug("连接异常: %s", exc)
+                except Exception:
+                    LOG.exception("处理消息出错")
+        except Exception:
+            LOG.debug("连接异常", exc_info=True)
         finally:
             await client.close()
-            if client.stub is not None and STATE is not None:
-                # 这个客户端掉线了，但别人的 streams / pending 里还留着指向它的条目 ——
-                # 不清掉就是一张永远不缩的僵尸表（而且它会一直把这些人的流 ID 占着）。
-                with STATE.lock:
-                    others = list(STATE.clients.values())
-                orphan_pending = []
-                for other in others:
-                    if other is client:
-                        continue
-                    for sid in [s for s, peer in other.streams.items() if peer == client.stub]:
-                        other.streams.pop(sid, None)
-                    for sid, info in list(other.pending.items()):
-                        if info.get("peer") == client.stub:
-                            other.pending.pop(sid, None)
-                            orphan_pending.append((other, sid, info))
-                # S6：这条连接掉线了，指向它的挂起流要**主动通知**发起方。以前只静默 pop，
-                # sweeper 之后也看不到这条 —— 发起方收不到任何回应，只能等自己客户端超时
-                #（和"目标不在线立刻回 CLOSE"不一致）。
-                for other, sid, info in orphan_pending:
-                    await other.send(close_msg(info["proto"], sid,
-                                               client.stub, info["dport"],
-                                               other.stub, info["sport"],
-                                               reason="对方已离线"))
-                with STATE.lock:
-                    if STATE.clients.get(client.stub) is client:
-                        STATE.clients.pop(client.stub, None)
-                STATE.log_event("断开", f"{client.keychip}（{stub_to_ip(client.stub)}）离线")
+            await cleanup(client)
 
-    # limit= 一行文本的上限（默认 64 KiB 装不下 base64 之后的大包，见 RELAY_LINE_LIMIT）
     server = await asyncio.start_server(on_client, host, port, limit=RELAY_LINE_LIMIT)
     LOG.info("中继已启动：%s:%d", host, port)
     sweeper = asyncio.create_task(pending_sweeper())
@@ -816,12 +586,9 @@ async def relay_serve(host: str, port: int, heartbeat_timeout: int,
         if stop is None:
             async with server:
                 await server.serve_forever()
-            return
-        # 有 stop 事件时（systemd / Ctrl+C）：等信号，然后把监听关掉正常退出。
-        # 注意别只 add_signal_handler 却不 await —— 那样 SIGTERM 会被吞掉，
-        # systemd 要等到 TimeoutStopSec 才 SIGKILL。（踩过）
-        async with server:
-            await stop.wait()
+        else:
+            async with server:
+                await stop.wait()
     finally:
         sweeper.cancel()
         try:
@@ -831,7 +598,6 @@ async def relay_serve(host: str, port: int, heartbeat_timeout: int,
     LOG.info("收到停止信号，中继已关闭")
 
 
-# ------------------------------------------------------------------ HTTP 大厅
 DASHBOARD = """<!doctype html><html lang="zh"><head><meta charset="utf-8">
 <title>instorematchd 看板</title><meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
@@ -843,7 +609,7 @@ h1{font-size:18px;margin:0 0 4px}.sub{color:#8b8b9b;margin-bottom:16px}
 table{border-collapse:collapse;width:100%;margin-bottom:16px}
 th,td{text-align:left;padding:6px 10px;border-bottom:1px solid #2c2c38;font-size:13px}
 th{color:#8b8b9b;font-weight:500}
-.ok{color:#7ee787}.warn{color:#ffa657}
+.ok{color:#7ee787}
 h2{font-size:15px;margin:18px 0 6px;color:#c8c8d8}
 </style></head><body>
 <h1>instorematchd</h1><div class="sub" id="sub">加载中…</div>
@@ -856,8 +622,8 @@ function ts(t){return new Date(t*1000).toLocaleTimeString('zh-CN',{hour12:false}
 async function tick(){
   let d; try{ d=await (await fetch('/api/status'+location.search)).json() }catch(e){ return }
   document.getElementById('sub').textContent =
-    `协议 v${d.version} · 已运行 ${Math.floor(d.uptime/60)} 分 ${d.uptime%60} 秒 · 房间有效期 ${d.recruit_ttl}s` +
-    (d.masked ? ' · keychip / IP 已打码（看全部：/admin?token=…）' : ' · 管理员视图：全部信息');
+    `协议 v${d.version} · 已运行 ${Math.floor(d.uptime/60)} 分 ${d.uptime%60} 秒` +
+    (d.masked ? ' · keychip / IP 已打码' : ' · 管理员视图');
   document.getElementById('cards').innerHTML =
     `<div class="card"><b class="${d.online?'ok':''}">${d.online}</b>在线玩家</div>`+
     `<div class="card"><b>${d.rooms}</b>进行中房间</div>`+
@@ -885,7 +651,6 @@ class LobbyHandler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         LOG.debug("HTTP %s - %s", self.address_string(), fmt % args)
 
-    # -------------------------------------------------- 工具
     def _send(self, code: int, body: bytes, ctype="application/json; charset=utf-8"):
         try:
             self.send_response(code)
@@ -898,9 +663,6 @@ class LobbyHandler(BaseHTTPRequestHandler):
             self.wfile.write(body)
         except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError,
                 TimeoutError, OSError):
-            # 客户端在我们回包前就断了（很常见：慢连接到点被超时收掉、页签关掉）。
-            # http.server 的 handle_one_request 只接 TimeoutError，BrokenPipe 会冒到
-            # socketserver 打一整条 traceback —— 公开接口上能被用来刷日志。这里就地收尾。
             self.close_connection = True
 
     def _json(self, code: int, obj):
@@ -912,25 +674,16 @@ class LobbyHandler(BaseHTTPRequestHandler):
             if n <= 0:
                 return {}
             if n > MAX_BODY_BYTES:
-                # 声明了超长 body：不读、直接当空 body 处理（各 handler 回 400）。
-                # 顺便关掉这条 keep-alive 连接，免得没读走的那堆字节被当成下一个请求。
                 self.close_connection = True
                 return {}
             raw = self.rfile.read(n)
             if not raw:
                 return {}
             data = json.loads(raw.decode("utf-8"))
-            # 只接受 JSON **对象**。数组 / 字符串 / 数字 / true 都能被 json.loads 解出来，
-            # 但后面每个 handler 都是 `(data or {}).get(...)` —— list 没有 .get，
-            # AttributeError 在 HTTP 线程里抛出去 = 这个连接**直接被掐断**，
-            # 客户端看到的是 RemoteDisconnected，而不是一个干净的 400
-            # （未鉴权接口，一个 `[1,2,3]` 就能触发）。这里统一挡成"空对象"，
-            # 由各 handler 按"缺少字段"回 400。
             return data if isinstance(data, dict) else {}
         except Exception:
             return {}
 
-    # -------------------------------------------------- 路由
     def do_OPTIONS(self):
         self._send(204, b"")
 
@@ -947,7 +700,7 @@ class LobbyHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         path = urlparse(self.path).path
         if path == "/recruit/list":
-            STATE.prune_recruits()
+            STATE.prune_rooms()
             with STATE.lock:
                 lines = []
                 for rec in STATE.recruits.values():
@@ -955,31 +708,22 @@ class LobbyHandler(BaseHTTPRequestHandler):
                     item.pop("Keychip", None)
                     item.pop("Time", None)
                     lines.append(json.dumps(item, ensure_ascii=False))
-            self._send(200, "\n".join(lines).encode("utf-8"),
-                       "text/plain; charset=utf-8")
+            self._send(200, "\n".join(lines).encode("utf-8"), "text/plain; charset=utf-8")
         elif path == "/info":
             self._json(200, {"relayHost": self._relay_host(), "relayPort": RELAY_PORT})
         elif path == "/online":
             snap = STATE.snapshot()
-            self._json(200, {"totalUsers": snap["online"],
-                             "activeRecruits": snap["rooms"]})
+            self._json(200, {"totalUsers": snap["online"], "activeRecruits": snap["rooms"]})
         elif path == "/api/status":
-            # 不带 token → 脱敏视图；带对 token → 全量
             self._json(200, STATE.snapshot(mask=not self._token_ok()))
         elif path == "/admin":
             if not self._token_ok():
-                if not ADMIN_TOKEN:
-                    self._send(403, "管理员视图没开启：启动时加 --admin-token <token>"
-                                    "（或设环境变量 IMD_ADMIN_TOKEN）".encode("utf-8"),
-                               "text/plain; charset=utf-8")
-                else:
-                    self._send(403, "token 不对。用法：/admin?token=你的token".encode("utf-8"),
-                               "text/plain; charset=utf-8")
+                self._send(403, b"forbidden", "text/plain; charset=utf-8")
                 return
             self._send(200, DASHBOARD.encode("utf-8"), "text/html; charset=utf-8")
         elif path == "/debug":
             if not self._token_ok():
-                self._json(403, {"error": "需要 token（/debug?token=… 或 X-Admin-Token 头）"})
+                self._json(403, {"error": "forbidden"})
                 return
             snap = STATE.snapshot()
             snap["host_header"] = self.headers.get("Host")
@@ -990,16 +734,11 @@ class LobbyHandler(BaseHTTPRequestHandler):
             self._json(404, {"error": "not found"})
 
     def _token_ok(self) -> bool:
-        """带对 token 才算管理员：支持 ?token=xxx 或 X-Admin-Token 头"""
         if not ADMIN_TOKEN:
             return False
         tok = (parse_qs(urlparse(self.path).query).get("token") or [""])[0]
         if not tok:
             tok = self.headers.get("X-Admin-Token", "")
-        # ★ 必须用 **bytes** 比：hmac.compare_digest 对**非 ASCII 的 str** 会抛
-        #   TypeError("comparing strings with non-ASCII characters is not supported")。
-        #   token 是从 URL 查询串来的 —— 谁都能塞个 emoji 进来，一抛就是这条请求
-        #   直接断连（客户端看到 RemoteDisconnected）+ 日志里一条 traceback。
         try:
             return hmac.compare_digest(tok.encode("utf-8"), ADMIN_TOKEN.encode("utf-8"))
         except Exception:
@@ -1008,70 +747,47 @@ class LobbyHandler(BaseHTTPRequestHandler):
     def _relay_host(self) -> str:
         if HOST_OVERRIDE:
             return HOST_OVERRIDE
-        host = self.headers.get("Host") or "127.0.0.1"
-        return host.split(":")[0]
+        return (self.headers.get("Host") or "127.0.0.1").split(":")[0]
 
-    # -------------------------------------------------- 招募
     def _recruit_start(self, data: dict):
-        # S2：嵌套字段类型不可信。`RecruitInfo`/`MechaInfo` 是字符串/列表时，以前这里
-        # `.get()` 会抛未捕获的 AttributeError → 连接被掐断 + 日志 traceback。
         info = as_dict((data or {}).get("RecruitInfo"))
         if not info:
             self._json(400, {"error": "RecruitInfo 缺失或不是对象"})
             return
         mecha = as_dict(info.get("MechaInfo"))
         if not mecha:
-            self._json(400, {"error": "RecruitInfo.MechaInfo 缺失或不是对象"})
+            self._json(400, {"error": "MechaInfo 缺失或不是对象"})
             return
         stub = as_stub(mecha.get("IpAddress"))
         if stub is None:
-            self._json(400, {"error": "RecruitInfo.MechaInfo.IpAddress 缺失或不是整数"})
+            self._json(400, {"error": "IpAddress 缺失或不是整数"})
             return
-
         keychip = (data or {}).get("Keychip")
-        # keychip 必须是字符串：非字符串（数字/对象/列表）会在 keychip_to_stub 的
-        # `.encode()` 上抛 AttributeError，同样是"一个请求掐断一条连接"。
         if not isinstance(keychip, str) or not keychip:
             self._json(400, {"error": "缺少 Keychip（或它不是字符串）"})
             return
-        # 房间的"伪 IP"必须**就是这个 keychip 算出来的那个**。否则房客拿着列表里的
-        # 地址找过来必然是"目标不在线"，而日志里只有一句 warning —— 客户端以前那个
-        # "刷卡前用占位 keychip 算过一次伪 IP"的坑正好会踩中，会变成查不出来的失踪案。
         if keychip_to_stub(keychip) != stub:
-            LOG.warning("开房被拒：Keychip 与 IpAddress 对不上（%s vs %s）",
-                        keychip, stub_to_ip(stub))
-            self._json(400, {"error": "Keychip 与 RecruitInfo.MechaInfo.IpAddress 不一致"})
+            self._json(400, {"error": "Keychip 与 IpAddress 不一致"})
             return
 
-        # /recruit/start 是个公开接口（谁都能 POST），加一道按来源 IP 的限速和一个总量上限
         now = time.time()
         src = self.client_address[0]
         with STATE.lock:
             posts = STATE.room_posts.setdefault(src, deque())
             while posts and now - posts[0] > ROOM_RATE_WINDOW:
                 posts.popleft()
-            rate_limited = len(posts) >= ROOM_RATE_MAX
-            if not rate_limited:
-                posts.append(now)
-                room_full = stub not in STATE.recruits and len(STATE.recruits) >= MAX_ROOMS
-            else:
-                room_full = False
-        if rate_limited:
-            LOG.warning("开房被限速：%s（%.0fs 内超过 %d 次）", src, ROOM_RATE_WINDOW, ROOM_RATE_MAX)
-            self._json(429, {"error": "开房太频繁，稍后再试"})
-            return
-        if room_full:
-            self._json(429, {"error": "大厅房间已满，稍后再试"})
-            return
-
-        with STATE.lock:
+            if len(posts) >= ROOM_RATE_MAX:
+                self._json(429, {"error": "开房太频繁，稍后再试"})
+                return
+            posts.append(now)
+            if stub not in STATE.recruits and len(STATE.recruits) >= MAX_ROOMS:
+                self._json(429, {"error": "大厅房间已满，稍后再试"})
+                return
             is_new = stub not in STATE.recruits
             STATE.recruits[stub] = {"rec": data, "keychip": keychip, "ts": now}
         if is_new:
             STATE.log_event("开房", f"{first_name(mecha) or '?'} 开房"
                                     f"（曲目 {info.get('MusicID') or mecha.get('MusicID')}）")
-        else:
-            LOG.debug("刷新房间 %s（%s）", stub_to_ip(stub), keychip)
         self._json(200, {"ok": True})
 
     def _recruit_finish(self, data: dict):
@@ -1081,11 +797,11 @@ class LobbyHandler(BaseHTTPRequestHandler):
             return
         mecha = as_dict(info.get("MechaInfo"))
         if not mecha:
-            self._json(400, {"error": "RecruitInfo.MechaInfo 缺失或不是对象"})
+            self._json(400, {"error": "MechaInfo 缺失或不是对象"})
             return
         stub = as_stub(mecha.get("IpAddress"))
         if stub is None:
-            self._json(400, {"error": "缺少 IpAddress（或它不是整数）"})
+            self._json(400, {"error": "IpAddress 缺失或不是整数"})
             return
         with STATE.lock:
             rec = STATE.recruits.get(stub)
@@ -1098,25 +814,16 @@ class LobbyHandler(BaseHTTPRequestHandler):
                 return
             STATE.recruits.pop(stub, None)
         STATE.log_event("关房", f"{first_name(mecha) or '?'} 结束招募")
-        # 房主开打了/退了，可能还有人正挂着"建流"等他接 —— 一起取消掉，
-        # 否则那些人要干等到 pending 超时（表现就是"点了加入一直转圈"）。
         schedule(cancel_pending_to(stub, "房主结束了招募"))
         self._json(200, {"ok": True})
 
 
 HOST_OVERRIDE = ""
 RELAY_PORT = 20101
-LOOP: "asyncio.AbstractEventLoop | None" = None      # 中继跑在哪个事件循环上（见 schedule）
+LOOP: "asyncio.AbstractEventLoop | None" = None
 
 
 def schedule(coro):
-    """
-    把协程丢回中继的事件循环去执行。
-
-    大厅是 ThreadingHTTPServer（每个请求一个线程），而中继跑在主线程的 asyncio
-    loop 上 —— 在 HTTP 线程里没法直接 await。关房时要取消别人的挂起建流，
-    就必须走这一道。
-    """
     if LOOP is None or LOOP.is_closed():
         return
     try:
@@ -1126,13 +833,6 @@ def schedule(coro):
 
 
 class BoundedThreadingHTTPServer(ThreadingHTTPServer):
-    """每个请求一个线程，但**并发有上限**（S3）。
-
-    没有上限 + socket 没有 timeout 时，慢连接（slowloris：只发半个请求头，或声明了
-    Content-Length 却不发 body）能把线程和 fd 耗干。这里在 accept 之后先抢一个信号量，
-    抢不到就**停在 accept**（不新开线程），靠 OS backlog 挡着；配合 LobbyHandler.timeout
-    的读取超时，慢连接最多占一个线程到超时为止。
-    """
     daemon_threads = True
     request_queue_size = 128
 
@@ -1145,7 +845,6 @@ class BoundedThreadingHTTPServer(ThreadingHTTPServer):
         try:
             super().process_request(request, client_address)
         except BaseException:
-            # 线程没起来就还回去，否则每来一次失败请求就少一个名额
             self._sema.release()
             raise
 
@@ -1157,19 +856,17 @@ class BoundedThreadingHTTPServer(ThreadingHTTPServer):
 
 
 def lobby_serve(bind: str, port: int):
-    LobbyHandler.timeout = LOBBY_TIMEOUT        # StreamRequestHandler.setup() 会用它 settimeout
+    LobbyHandler.timeout = LOBBY_TIMEOUT
     httpd = BoundedThreadingHTTPServer((bind, port), LobbyHandler)
     httpd.daemon_threads = True
-    LOG.info("大厅已启动：%s:%d（最多 %d 个请求线程，读取超时 %ds）",
-             bind, port, MAX_LOBBY_THREADS, LOBBY_TIMEOUT)
+    LOG.info("大厅已启动：%s:%d（最多 %d 个请求线程）",
+             bind, port, MAX_LOBBY_THREADS)
     httpd.serve_forever()
 
 
-# ------------------------------------------------------------------ 入口
 def main():
     global STATE, HOST_OVERRIDE, RELAY_PORT, ADMIN_TOKEN, LOOP
-    global PENDING_TIMEOUT, MAX_ROOMS
-    global MAX_CLIENTS, MAX_CLIENTS_PER_IP
+    global PENDING_TIMEOUT, MAX_ROOMS, MAX_CLIENTS, MAX_CLIENTS_PER_IP
     global SEND_DRAIN_TIMEOUT, LOBBY_TIMEOUT, MAX_LOBBY_THREADS
 
     def positive(name):
@@ -1177,49 +874,33 @@ def main():
             try:
                 n = int(text)
             except ValueError:
-                raise argparse.ArgumentTypeError("%s 必须是整数，收到 %r" % (name, text))
+                raise argparse.ArgumentTypeError(f"{name} 必须是整数")
             if n < 1:
-                # 0 / 负数不是"关掉限制"，而是会把功能整个搞坏（比如 pending-timeout=0
-                # 会让每一次加入都立刻被回收，heartbeat-timeout=0 会让每个客户端一读就超时）。
-                # 与其静默地坏掉，不如启动时就报错。
-                raise argparse.ArgumentTypeError("%s 必须 >= 1，收到 %d" % (name, n))
+                raise argparse.ArgumentTypeError(f"{name} 必须 >= 1")
             return n
         return parse
 
-    ap = argparse.ArgumentParser(description="兼容 WorldLink/NyanLink 的联机服务端")
-    ap.add_argument("--bind", default="0.0.0.0", help="监听地址（默认 0.0.0.0）")
+    ap = argparse.ArgumentParser(description="InStoreLink 大厅 + 中继")
+    ap.add_argument("--bind", default="0.0.0.0")
     ap.add_argument("--lobby-port", type=positive("--lobby-port"), default=20100)
     ap.add_argument("--relay-port", type=positive("--relay-port"), default=20101)
-    ap.add_argument("--host-override", default="",
-                    help="强制 /info 返回的中继主机名（走反代时必填，例如 maimai.example.com）")
-    ap.add_argument("--recruit-ttl", type=positive("--recruit-ttl"), default=30,
-                    help="房间在这些秒内没有刷新就自动消失（默认 30）")
-    ap.add_argument("--heartbeat-timeout", type=positive("--heartbeat-timeout"), default=30,
-                    help="多久没收到心跳就断开（默认 30 秒）")
-    ap.add_argument("--pending-timeout", type=positive("--pending-timeout"), default=PENDING_TIMEOUT,
-                    help="建流请求多久没人接就回收、并回一条 CTL_TCP_CLOSE 给请求方"
-                         "（默认 10 秒）")
-    ap.add_argument("--max-rooms", type=positive("--max-rooms"), default=MAX_ROOMS,
-                    help="大厅同时在册的房间上限（默认 200）")
-    ap.add_argument("--max-clients", type=positive("--max-clients"), default=MAX_CLIENTS,
-                    help="中继同时注册的客户端总数上限（默认 %d）" % MAX_CLIENTS)
+    ap.add_argument("--host-override", default="")
+    ap.add_argument("--recruit-ttl", type=positive("--recruit-ttl"), default=30)
+    ap.add_argument("--heartbeat-timeout", type=positive("--heartbeat-timeout"), default=30)
+    ap.add_argument("--pending-timeout", type=positive("--pending-timeout"), default=PENDING_TIMEOUT)
+    ap.add_argument("--max-rooms", type=positive("--max-rooms"), default=MAX_ROOMS)
+    ap.add_argument("--max-clients", type=positive("--max-clients"), default=MAX_CLIENTS)
     ap.add_argument("--max-clients-per-ip", type=positive("--max-clients-per-ip"),
-                    default=MAX_CLIENTS_PER_IP,
-                    help="同一个来源 IP 的中继连接上限（默认 %d）" % MAX_CLIENTS_PER_IP)
-    ap.add_argument("--send-timeout", type=positive("--send-timeout"), default=SEND_DRAIN_TIMEOUT,
-                    help="中继 send() 的 drain 超时；对端只连不读时到点断开（默认 %d 秒）"
-                         % SEND_DRAIN_TIMEOUT)
-    ap.add_argument("--lobby-timeout", type=positive("--lobby-timeout"), default=LOBBY_TIMEOUT,
-                    help="大厅 HTTP 每条连接/每次读取的超时（默认 %d 秒）" % LOBBY_TIMEOUT)
+                    default=MAX_CLIENTS_PER_IP)
+    ap.add_argument("--send-timeout", type=positive("--send-timeout"),
+                    default=SEND_DRAIN_TIMEOUT)
+    ap.add_argument("--lobby-timeout", type=positive("--lobby-timeout"),
+                    default=LOBBY_TIMEOUT)
     ap.add_argument("--lobby-max-threads", type=positive("--lobby-max-threads"),
-                    default=MAX_LOBBY_THREADS,
-                    help="大厅 HTTP 同时处理的请求线程上限（默认 %d）" % MAX_LOBBY_THREADS)
+                    default=MAX_LOBBY_THREADS)
     ap.add_argument("--log-level", default="INFO",
                     choices=["DEBUG", "INFO", "WARNING", "ERROR"])
-    ap.add_argument("--admin-token", default=os.environ.get("IMD_ADMIN_TOKEN", ""),
-                    help="看 /admin（完整信息）用的 token；也可以放进环境变量 "
-                         "IMD_ADMIN_TOKEN。不设置就不开放 /admin，"
-                         "公开看板的 keychip / IP 依旧打码")
+    ap.add_argument("--admin-token", default=os.environ.get("IMD_ADMIN_TOKEN", ""))
     args = ap.parse_args()
 
     logging.basicConfig(
@@ -1238,9 +919,6 @@ def main():
     SEND_DRAIN_TIMEOUT = args.send_timeout
     LOBBY_TIMEOUT = args.lobby_timeout
     MAX_LOBBY_THREADS = args.lobby_max_threads
-    LOG.info("管理员视图(/admin)：%s", "已开启" if ADMIN_TOKEN else "未开启")
-    LOG.info("建流挂起超时 %ds，房间上限 %d，中继连接上限 %d（每 IP %d）",
-             PENDING_TIMEOUT, MAX_ROOMS, MAX_CLIENTS, MAX_CLIENTS_PER_IP)
     STATE = State(args.recruit_ttl)
 
     threading.Thread(target=lobby_serve, args=(args.bind, args.lobby_port),
@@ -1249,7 +927,6 @@ def main():
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     LOOP = loop
-
     stop = asyncio.Event()
     for sig in (signal.SIGINT, signal.SIGTERM):
         try:

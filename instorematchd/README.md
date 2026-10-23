@@ -1,5 +1,11 @@
 # instorematchd —— 自研联机服务端（大厅 + 中继）
 
+> **2026-10-23：服务端内部重写（v0.3.1 配套）**
+>
+> 命令行参数、HTTP 接口和 TCP 线协议保持兼容；内部把 relay 状态、房间生命周期、
+> 限流和断线清理整理成一套明确的状态机。原有异常/压力测试继续全绿，并额外通过
+> 100 客户端 / 20 房间 / 2000 条数据的并发压力测试。
+
 参照 [MuNET-OSS/NyanLink](https://github.com/MuNET-OSS/NyanLink)（Kotlin 版 worldlinkd）重写，
 **协议完全兼容，客户端 mod 不用改任何东西**，只要 `LobbyUrl` 指向本服务即可。
 

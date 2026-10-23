@@ -12,6 +12,8 @@
 
 using System;
 using System.Collections.Concurrent;
+using System.IO;
+using System.Net;
 using System.Net.Sockets;
 using System.Threading;
 using InStoreLink;
@@ -95,6 +97,7 @@ public static class ClientTests
         TestBadBase64IsDropped();
         TestStrayOpsAfterClose();
         TestSendQueueCap();
+        TestEventDrivenSendLoop();
 
         Console.WriteLine();
         Console.WriteLine("通过 " + _pass + " 项，失败 " + _fail + " 项");
@@ -382,5 +385,60 @@ public static class ClientTests
         LinkMsg left;
         bool ok = q.TryPeek(out left);
         Check(ok && left.Sid == 666, "留下的是另一条（sid 666），没误删");
+    }
+
+    /// <summary>
+    /// 真正启动 LinkClient 的发送线程：本机起一个 TCP listener，确认注册行和数据行
+    /// 都能被发出。旧实现靠每 10ms sleep 轮询；新实现靠 AutoResetEvent 唤醒。
+    /// </summary>
+    private static void TestEventDrivenSendLoop()
+    {
+        Console.WriteLine("13) 发送线程：注册行 + 数据行");
+        TcpListener listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        int port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        LinkClient c = new LinkClient("W9CLIENT0011", "127.0.0.1", port);
+        TcpClient server = null;
+        try
+        {
+            c.ConnectAsync();
+            for (int i = 0; i < 200 && server == null; i++)
+            {
+                if (listener.Pending()) server = listener.AcceptTcpClient();
+                else Thread.Sleep(10);
+            }
+            Check(server != null, "客户端连上本机 listener");
+            if (server == null) return;
+
+            server.ReceiveTimeout = 3000;
+            StreamReader reader = new StreamReader(server.GetStream());
+            string first = reader.ReadLine();
+            Check(first != null && first.StartsWith("1,1,"), "先发出 CTL_START");
+            Check(first != null && first.Contains("W9CLIENT0011"), "CTL_START 带 keychip");
+
+            c.Send(new LinkMsg
+            {
+                Cmd = (int)LinkCmd.DataSend,
+                Proto = LinkProto.Tcp,
+                Sid = 7,
+                SPort = 5000,
+                Dst = 0x7F000002u,
+                DPort = 5001,
+                Data = "aGVsbG8="
+            });
+            string data = reader.ReadLine();
+            Check(data != null && data.StartsWith("1,21,"), "随后发出数据行");
+            Check(data != null && data.EndsWith("aGVsbG8="), "数据行内容正确");
+        }
+        catch (Exception ex)
+        {
+            Check(false, "发送线程测试异常：" + ex.Message);
+        }
+        finally
+        {
+            c.Stop();
+            if (server != null) server.Close();
+            listener.Stop();
+        }
     }
 }

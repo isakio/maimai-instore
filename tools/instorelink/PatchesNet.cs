@@ -35,6 +35,10 @@ namespace InStoreLink
     {
         // 影子 socket 的假 mockID：Accept() 里造出来的那个哑 socket 用它，构造时跳过注册
         private const int MockSocketId = 3939;
+        private static float _nextHudUpdate;
+        private static string _lastHudText;
+        private static Color _lastHudColor;
+        private static bool _hudPrepared;
 
         // ------------------------------------------------------------ 入场
 
@@ -65,59 +69,57 @@ namespace InStoreLink
         {
             if (____buildVersionText == null || ____developmentBuildText == null) return;
 
-            // 借用本体原本放"开发版"字样的位置来显示我们的状态
-            ____buildVersionText.transform.position = ____developmentBuildText.transform.position;
-            ____buildVersionText.gameObject.SetActive(true);
+            // 主线程只做"有新快照才处理"，不再每帧读游戏房间列表/拼字符串。
+            LinkRuntime.MainThreadPump();
+
+            // TMP 的 text/color 赋值会触发 Canvas 重建；状态栏 2Hz 足够，且只在变化时写。
+            if (UnityEngine.Time.unscaledTime < _nextHudUpdate) return;
+            _nextHudUpdate = UnityEngine.Time.unscaledTime + 0.5f;
 
             LinkClient client = LinkRuntime.Client;
             if (client == null) return;
 
+            string text;
+            Color color;
             switch (client.StatusCode)
             {
                 case LinkClient.StatusFailed:
-                    ____buildVersionText.text = "InStoreLink 离线";
-                    ____buildVersionText.color = Color.red;
+                    text = "InStoreLink 离线";
+                    color = Color.red;
                     break;
                 case LinkClient.StatusIdle:
-                    ____buildVersionText.text = "InStoreLink 未连接";
-                    ____buildVersionText.color = Color.gray;
+                    text = "InStoreLink 未连接";
+                    color = Color.gray;
                     break;
                 case LinkClient.StatusConnecting:
-                    ____buildVersionText.text = "InStoreLink 连接中";
-                    ____buildVersionText.color = Color.yellow;
+                    text = "InStoreLink 连接中";
+                    color = Color.yellow;
                     break;
-                case LinkClient.StatusConnected:
-                    // GetRecruitList() 本体在"还没开局"时可能返回 null —— 直接取 .Count 会 NRE，
-                    // 而这个 postfix 一抛就是本体的 ViewUpdate 炸掉。
-                    int rooms = 0;
-                    IManager pm = LinkRuntime.PartyMan;
-                    if (pm != null)
-                    {
-                        System.Collections.Generic.List<RecruitInfo> all = pm.GetRecruitList();
-                        if (all != null) rooms = all.Count;
-                    }
-                    if (LinkRuntime.OnlineUserCount > 0)
-                    {
-                        ____buildVersionText.text = "房间 " + rooms + " · 在线 " + LinkRuntime.OnlineUserCount;
-                        ____buildVersionText.color = new Color(172 / 256f, 181 / 256f, 250 / 256f);
-                    }
-                    else
-                    {
-                        ____buildVersionText.text = "在线 0";
-                        ____buildVersionText.color = Color.gray;
-                    }
+                default:
+                    int rooms = LinkRuntime.Snapshot.Rooms.Length;
+                    int online = LinkRuntime.OnlineUsers;
+                    text = online > 0 ? "房间 " + rooms + " · 在线 " + online : "在线 0";
+                    color = online > 0
+                        ? new Color(172 / 256f, 181 / 256f, 250 / 256f)
+                        : Color.gray;
                     break;
             }
 
-            // 轮询线程收到的"新房间 / 关房"在这里落到游戏里 —— 这一帧是主线程，
-            // 上游是在轮询线程里直接调游戏方法的，我们挪到主线程来（见 LinkRuntime 注释）。
-            try
+            if (!_hudPrepared)
             {
-                PatchesParty.ReconcileRecruits();
+                ____buildVersionText.transform.position = ____developmentBuildText.transform.position;
+                ____buildVersionText.gameObject.SetActive(true);
+                _hudPrepared = true;
             }
-            catch (Exception ex)
+            if (text != _lastHudText)
             {
-                LinkLog.Error("分发招募列表失败：" + ex.Message);
+                ____buildVersionText.text = text;
+                _lastHudText = text;
+            }
+            if (color != _lastHudColor)
+            {
+                ____buildVersionText.color = color;
+                _lastHudColor = color;
             }
         }
 
@@ -149,6 +151,8 @@ namespace InStoreLink
                 }
                 RecruitInfo recruit = start != null ? start.RecruitInfo : finish.RecruitInfo;
                 string action = start != null ? "start" : "finish";
+                if (start != null) LinkRuntime.MyRoom = recruit;
+                else LinkRuntime.MyRoom = null;
                 RecruitRecordOut record = new RecruitRecordOut();
                 record.Keychip = LinkRuntime.Client.Keychip;
                 record.RecruitInfo = recruit;
