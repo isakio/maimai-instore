@@ -29,8 +29,11 @@
 > [`legacy-worldlink`](https://github.com/isakio/maimai-instore/tree/legacy-worldlink)。
 
 **只想玩？** 我们有一台已经跑着的大厅 `http://isakio.cn:20100` —— 去
-[**最新 Release**](https://github.com/isakio/maimai-instore/releases/latest) 拿两个 dll，
+[**最新 Release（v3.2）**](https://github.com/isakio/maimai-instore/releases/latest) 拿两个 dll，
 照着下面的「方式 A」做就行。想自己开一台看「方式 B」。
+
+> **当前发布：`v3.2`（2026-10-25）** —— `InStoreLink v0.3.1` + `InStoreMatch v2.5`。
+> Release 附件就是本仓库 `client/` 里的两个 DLL；校验值见下方「怎么用」。
 
 ## 它是怎么工作的
 
